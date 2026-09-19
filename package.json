@@ -1,0 +1,13 @@
+{
+  "name": "babymonitor",
+  "version": "1.0.0",
+  "description": "Baby monitor web: rilevazione movimento e pianto a livelli, video live tra dispositivi via Firebase.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "serve": "python3 -m http.server 8080 --bind 127.0.0.1",
+    "deploy": "firebase deploy"
+  },
+  "license": "MIT"
+}
