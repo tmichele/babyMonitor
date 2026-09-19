@@ -27,7 +27,8 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
 
 - Un progetto Firebase (piano gratuito sufficiente).
 - L'app va servita via **HTTPS** (o `localhost`): i browser lo richiedono per camera, microfono e
-  notifiche. Firebase Hosting, GitHub Pages, Netlify o qualsiasi hosting statico vanno bene.
+  notifiche. **GitHub Pages** è la scelta più semplice (vedi sotto); vanno bene anche Firebase
+  Hosting, Netlify o qualsiasi hosting statico.
 - Browser recenti (Chrome/Edge/Firefox/Safari). Su iOS l'app funziona in Safari con la scheda in
   primo piano.
 
@@ -48,17 +49,34 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
 
 Nessun indice composito è necessario: le query usano un solo campo di ordinamento.
 
-## Avvio
+## Pubblicazione su GitHub Pages (consigliata, gratuita)
+
+Come per l'app della spesa: nessun build, basta servire i file del repository.
+
+1. Su GitHub apri il repository → **Settings** → **Pages**.
+2. Source: **Deploy from a branch** → Branch: **main** → cartella **/ (root)** → **Save**.
+3. Dopo 1-2 minuti l'app è online su `https://TUOUSERNAME.github.io/babyMonitor/`
+   (HTTPS incluso, quindi camera, microfono e notifiche funzionano).
+4. Apri l'URL su ogni dispositivo e, alla prima apertura, incolla la configurazione Firebase
+   nella schermata iniziale (viene salvata nel browser di quel dispositivo).
+5. In Firebase → **Authentication → Impostazioni → Domini autorizzati** aggiungi
+   `TUOUSERNAME.github.io`.
+
+Se preferisci non incollare la configurazione su ogni dispositivo, puoi committare
+`firebase-config.js` (togli la riga da `.gitignore`): la chiave API web di Firebase non è un
+segreto, la protezione dei dati è data dalle regole Firestore e dal login.
+
+## Avvio in locale
 
 ```bash
-# sviluppo locale (localhost è considerato sicuro dai browser)
-npm run serve          # http://127.0.0.1:8080
-
-# deploy su Firebase Hosting (richiede firebase-tools e `firebase use <progetto>`)
-npm run deploy
+npm run serve          # http://127.0.0.1:8080 (localhost è considerato sicuro dai browser)
 ```
 
-Sui due dispositivi:
+In alternativa a GitHub Pages: `npm run deploy` pubblica su Firebase Hosting (richiede
+`firebase-tools` e `firebase use <progetto>`).
+
+## Uso sui due dispositivi
+
 
 1. Apri l'app, accedi con lo **stesso account** (registrati la prima volta).
 2. Sul dispositivo vicino al bambino scegli **Camera**, dai un nome, premi **Avvia monitoraggio**
