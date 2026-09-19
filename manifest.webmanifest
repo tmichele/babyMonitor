@@ -1,0 +1,13 @@
+{
+  "name": "Baby Monitor",
+  "short_name": "BabyMonitor",
+  "description": "Rilevazione movimento e pianto con video in diretta tra dispositivi.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "it",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
