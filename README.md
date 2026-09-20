@@ -41,9 +41,9 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
    [`firestore.rules`](firestore.rules) (oppure `firebase deploy --only firestore:rules`).
 4. Copia la configurazione dell'app web (Impostazioni progetto → Le tue app → Configurazione SDK).
    Puoi:
-   - incollarla nella **schermata iniziale** dell'app (viene salvata nel browser di quel dispositivo), oppure
-   - copiare `firebase-config.example.js` in `firebase-config.js` e inserirla lì (il file è
-     ignorato da git; vale per tutti i dispositivi che aprono quell'hosting).
+   - inserirla in **`firebase-config.js`** nel repository (anche direttamente da GitHub con la
+     matita "Edit"): vale per tutti i dispositivi che aprono il sito, che passano subito al login; oppure
+   - incollarla nella **schermata iniziale** dell'app su ogni dispositivo (viene salvata nel browser).
 5. Se pubblichi su un dominio diverso da quelli Firebase, aggiungilo in
    **Authentication → Impostazioni → Domini autorizzati**.
 
@@ -57,14 +57,10 @@ Come per l'app della spesa: nessun build, basta servire i file del repository.
 2. Source: **Deploy from a branch** → Branch: **main** → cartella **/ (root)** → **Save**.
 3. Dopo 1-2 minuti l'app è online su `https://TUOUSERNAME.github.io/babyMonitor/`
    (HTTPS incluso, quindi camera, microfono e notifiche funzionano).
-4. Apri l'URL su ogni dispositivo e, alla prima apertura, incolla la configurazione Firebase
-   nella schermata iniziale (viene salvata nel browser di quel dispositivo).
+4. Apri l'URL su ogni dispositivo: se hai compilato `firebase-config.js` vedi subito il login,
+   altrimenti incolla la configurazione Firebase nella schermata iniziale.
 5. In Firebase → **Authentication → Impostazioni → Domini autorizzati** aggiungi
    `TUOUSERNAME.github.io`.
-
-Se preferisci non incollare la configurazione su ogni dispositivo, puoi committare
-`firebase-config.js` (togli la riga da `.gitignore`): la chiave API web di Firebase non è un
-segreto, la protezione dei dati è data dalle regole Firestore e dal login.
 
 ## Avvio in locale
 

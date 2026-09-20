@@ -1,5 +1,5 @@
 // Bootstrap: configurazione → Firebase → auth → router hash-based.
-import { loadFirebaseConfig, clearFirebaseConfig, hasWindowFirebaseConfig } from './config.js';
+import { loadFirebaseConfig } from './config.js';
 import { initFirebase, auth, A } from './firebase.js';
 import { renderSetup } from './views/setup.js';
 import { renderAuth } from './views/auth.js';
@@ -81,8 +81,8 @@ async function boot() {
     firebaseReady = true;
   } catch (err) {
     console.error(err);
-    initError = `Inizializzazione Firebase fallita: ${err.message}`;
-    if (!hasWindowFirebaseConfig()) clearFirebaseConfig();
+    // La configurazione salvata resta: l'errore è quasi sempre di rete, non di configurazione.
+    initError = `Inizializzazione Firebase fallita: ${err.message}. Controlla la connessione e riprova.`;
     toast(initError, 'error', 8000);
   }
   if (firebaseReady) {
