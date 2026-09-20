@@ -4,7 +4,7 @@
 //     cameraCandidates/*, viewerCandidates/*
 // Il visualizzatore crea la richiesta, la camera risponde con l'offerta (tracce audio+video),
 // il visualizzatore invia la risposta. I candidati ICE si ascoltano solo dopo la remote description.
-import { S } from './firebase.js';
+import { S, db } from './firebase.js';
 import { loadIceServers } from './config.js';
 
 const DISCONNECT_GRACE_MS = 10000;
@@ -31,9 +31,10 @@ export async function deleteCall(callRef) {
 
 /** Lato camera: risponde alle richieste di visione con il MediaStream locale. */
 export class CameraStreamer {
-  constructor({ stream, callsRef, onViewersChange = () => {} }) {
+  constructor({ stream, callsRef, sessionId = '', onViewersChange = () => {} }) {
     this.stream = stream;
     this.callsRef = callsRef;
+    this.sessionId = sessionId;
     this.onViewersChange = onViewersChange;
     this.peers = new Map();
     this.unsubscribe = null;
@@ -61,7 +62,23 @@ export class CameraStreamer {
     }
   }
 
+  /** Si aggiudica la richiesta: se un'altra scheda camera l'ha già presa, non risponde. */
+  async claimRequest(callRef) {
+    try {
+      return await S.runTransaction(db, async (tx) => {
+        const snap = await tx.get(callRef);
+        if (!snap.exists() || snap.data().status !== 'requested') return false;
+        tx.update(callRef, { status: 'claimed', cameraSession: this.sessionId });
+        return true;
+      });
+    } catch (err) {
+      console.warn('Richiesta non aggiudicata', err);
+      return false;
+    }
+  }
+
   async handleRequest(callRef) {
+    if (!(await this.claimRequest(callRef))) return;
     const pc = new RTCPeerConnection(rtcConfig());
     const peer = { pc, unsubs: [], disconnectTimer: null };
     this.peers.set(callRef.id, peer);
@@ -147,6 +164,24 @@ export class CameraStreamer {
     this.unsubscribe = null;
     for (const [id] of this.peers) this.endCall(S.doc(this.callsRef, id));
   }
+
+  /** Chiude tutto senza cancellare documenti: un'altra sessione camera è ora responsabile. */
+  stopLocal() {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    for (const peer of this.peers.values()) {
+      peer.unsubs.forEach((u) => u());
+      if (peer.disconnectTimer) clearTimeout(peer.disconnectTimer);
+      if (peer.offerTimer) clearTimeout(peer.offerTimer);
+      try {
+        peer.pc.close();
+      } catch {
+        /* ignora */
+      }
+    }
+    this.peers.clear();
+    this.emitViewers();
+  }
 }
 
 /** Lato visualizzatore: richiede il flusso a una camera e lo mostra in un <video>. */
@@ -174,8 +209,9 @@ export class ViewerStream {
       (e.streams[0]?.getTracks() || [e.track]).forEach((t) => {
         if (!remote.getTracks().includes(t)) remote.addTrack(t);
       });
-      this.videoEl.play?.().catch(() => {});
+      this.tryPlay();
     };
+    pc.oniceconnectionstatechange = () => console.info('ICE:', pc.iceConnectionState);
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       if (st === 'connected') this.onStatus('connected');
@@ -227,6 +263,16 @@ export class ViewerStream {
     this.timers.push(setTimeout(() => {
       if (!answering && !this.stopped) this.fail('La camera non risponde: è attiva?');
     }, OFFER_TIMEOUT_MS));
+  }
+
+  /** Alcuni browser (iOS) bloccano la riproduzione con audio fuori da un tocco: ripiega su muto. */
+  tryPlay() {
+    const v = this.videoEl;
+    if (!v?.play) return;
+    v.play().catch(() => {
+      v.muted = true;
+      v.play().then(() => this.onStatus('muted')).catch(() => {});
+    });
   }
 
   fail(message) {

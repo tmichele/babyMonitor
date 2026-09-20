@@ -183,6 +183,16 @@ export async function deleteDoc(ref) {
   applyOp({ type: 'delete', path: ref.path }, true);
 }
 
+export async function runTransaction(_db, fn) {
+  const tx = {
+    get: async (ref) => docSnap(ref.path, store.get(ref.path)),
+    set: (ref, data, opts) => applyOp({ type: 'set', path: ref.path, data: clone(data), merge: !!opts?.merge }, true),
+    update: (ref, data) => applyOp({ type: 'set', path: ref.path, data: clone(data), merge: true }, true),
+    delete: (ref) => applyOp({ type: 'delete', path: ref.path }, true),
+  };
+  return fn(tx);
+}
+
 export function query(col, ...constraints) {
   return { col, constraints };
 }

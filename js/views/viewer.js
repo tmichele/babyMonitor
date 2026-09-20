@@ -53,6 +53,7 @@ export function renderViewer(root) {
           <button id="v-stop" class="btn danger big" hidden>■ Ferma video</button>
           <button id="v-mute" class="btn" hidden>🔈 Audio attivo</button>
         </div>
+        <p class="muted small" id="v-msg" hidden></p>
       </div>
 
       <div class="card">
@@ -109,6 +110,7 @@ export function renderViewer(root) {
     vStart: $('#v-start', root),
     vStop: $('#v-stop', root),
     vMute: $('#v-mute', root),
+    vMsg: $('#v-msg', root),
     pMotion: $('#p-motion', root),
     pCry: $('#p-cry', root),
     pSound: $('#p-sound', root),
@@ -374,7 +376,23 @@ export function renderViewer(root) {
     disconnected: ['Segnale perso…', 'wait'],
     error: ['Errore', 'off'],
   };
+  const CONN_HINTS = {
+    requesting: 'In attesa che la camera risponda. Se resta qui, controlla che il monitoraggio sia attivo sulla camera.',
+    connecting: 'Negoziazione in corso…',
+    disconnected: 'Il collegamento si è interrotto, riprovo per qualche secondo…',
+  };
+  function showMsg(text, kind = 'muted') {
+    el.vMsg.hidden = !text;
+    el.vMsg.textContent = text || '';
+    el.vMsg.className = `small ${kind}`;
+  }
   function setConn(status, message) {
+    if (status === 'muted') {
+      el.video.muted = true;
+      el.vMute.textContent = '🔇 Audio disattivato: tocca per attivarlo';
+      showMsg('Il browser ha avviato il video senza audio: tocca il pulsante per attivarlo.');
+      return;
+    }
     const [label, cls] = CONN_LABELS[status] || CONN_LABELS.idle;
     el.conn.textContent = label;
     el.conn.className = `badge ${cls}`;
@@ -382,14 +400,23 @@ export function renderViewer(root) {
     el.vStart.hidden = active;
     el.vStop.hidden = !active;
     el.vMute.hidden = status !== 'connected';
-    if (status === 'error' && message) toast(message, 'error', 6000);
+    if (status === 'error') {
+      if (message) toast(message, 'error', 6000);
+      showMsg(message ? `Video non avviato: ${message}` : 'Video non avviato.', 'error');
+    } else if (status === 'idle') {
+      if (!el.vMsg.classList.contains('error')) showMsg('');
+    } else {
+      showMsg(CONN_HINTS[status] || '');
+    }
     if (status === 'error' || status === 'idle') state.stream = null;
   }
 
   async function startStream() {
     if (!state.selectedId || state.stream) return;
     unlockAudio();
+    showMsg('');
     el.video.muted = false;
+    el.vMute.textContent = '🔈 Audio attivo';
     state.stream = new ViewerStream({
       callsRef: callsCol(state.selectedId),
       videoEl: el.video,
