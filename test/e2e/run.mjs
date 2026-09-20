@@ -210,6 +210,18 @@ try {
   await cam.click('#btn-logout');
   await cam.waitForSelector('#auth-form');
   check(true, 'logout riporta al login');
+
+  console.log('8. SDK non raggiungibile: la configurazione salvata resta');
+  const offline = await browser.newContext();
+  await offline.route('**/firebasejs/**', (route) => route.abort());
+  const off = await offline.newPage();
+  await off.goto(base);
+  await off.evaluate(() => localStorage.setItem('babymonitor.firebaseConfig', JSON.stringify({ apiKey: 'k', projectId: 'p', appId: 'a' })));
+  await off.reload();
+  await off.waitForSelector('#cfg-retry');
+  check(/"projectId": "p"/.test(await off.$eval('#cfg-input', (e) => e.value)), 'configurazione ancora presente con pulsante Riprova');
+  check(await off.evaluate(() => localStorage.getItem('babymonitor.firebaseConfig') !== null), 'localStorage non cancellato');
+  await offline.close();
 } catch (err) {
   failures.push(err.message);
   console.log(`  ✗ ${err.message}`);

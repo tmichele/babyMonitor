@@ -1,6 +1,9 @@
-// Copia questo file in `firebase-config.js` e inserisci i valori del tuo progetto Firebase
-// (Console Firebase → Impostazioni progetto → Le tue app → Configurazione SDK).
-// Il file `firebase-config.js` è ignorato da git.
+// Configurazione Firebase condivisa da tutti i dispositivi che aprono questo sito.
+// Sostituisci i valori segnaposto con quelli del tuo progetto (Console Firebase →
+// Impostazioni progetto → Le tue app → Configurazione SDK): finché restano i segnaposto,
+// l'app chiede di incollare la configurazione nella schermata iniziale di ogni dispositivo.
+// La chiave API web di Firebase non è un segreto: i dati sono protetti dal login e dalle
+// regole Firestore (firestore.rules).
 window.FIREBASE_CONFIG = {
   apiKey: 'YOUR_API_KEY',
   authDomain: 'YOUR_PROJECT.firebaseapp.com',

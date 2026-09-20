@@ -28,7 +28,8 @@ export function renderSetup(root, { error = null } = {}) {
         <textarea id="ice-input" rows="4" spellcheck="false">${escapeHtml(JSON.stringify(ice, null, 2))}</textarea>
       </details>
       <div class="actions">
-        <button id="cfg-save" class="btn primary">Salva e continua</button>
+        ${error ? '<button id="cfg-retry" class="btn primary">Riprova</button>' : ''}
+        <button id="cfg-save" class="btn ${error ? '' : 'primary'}">Salva e continua</button>
         ${existing ? '<button id="cfg-clear" class="btn">Rimuovi configurazione salvata</button>' : ''}
       </div>
     </div>
@@ -49,6 +50,10 @@ export function renderSetup(root, { error = null } = {}) {
     } catch (err) {
       toast(err.message, 'error', 6000);
     }
+  });
+  $('#cfg-retry', root)?.addEventListener('click', () => {
+    location.hash = '#/';
+    location.reload();
   });
   $('#cfg-clear', root)?.addEventListener('click', () => {
     clearFirebaseConfig();
