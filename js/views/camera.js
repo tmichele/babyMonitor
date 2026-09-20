@@ -15,6 +15,10 @@ import { WakeLockKeeper } from '../alerts.js';
 const HEARTBEAT_MS = 20000;
 const STATE_PUBLISH_MS = 1500;
 
+function randomSessionId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
 export function renderCamera(root) {
   const cameraId = getDeviceId();
   let settings = normalizeSettings(prefs.getCameraSettings());
@@ -100,6 +104,7 @@ export function renderCamera(root) {
 
   const state = {
     running: false,
+    sessionId: null,
     stream: null,
     motionDet: null,
     cryDet: null,
@@ -267,6 +272,7 @@ export function renderCamera(root) {
     return {
       name: getDeviceName(),
       deviceId: cameraId,
+      sessionId: state.sessionId,
       status: 'online',
       monitoring: true,
       settings,
@@ -317,7 +323,15 @@ export function renderCamera(root) {
   function listenRemoteSettings() {
     state.unsubDoc = S.onSnapshot(docRef(), (snap) => {
       if (snap.metadata.hasPendingWrites || !snap.exists()) return;
-      const remote = snap.data().settings;
+      const data = snap.data();
+      if (data.sessionId && data.sessionId !== state.sessionId) {
+        // Un'altra scheda/dispositivo ha avviato il monitoraggio con lo stesso id: questa si ferma
+        // per non rispondere due volte alle richieste video.
+        stop({ takenOver: true });
+        toast('Monitoraggio avviato in un\'altra scheda: questa è stata fermata.', 'error', 8000);
+        return;
+      }
+      const remote = data.settings;
       if (remote && !settingsEqual(remote, settings)) {
         settings = normalizeSettings(remote);
         prefs.setCameraSettings(settings);
@@ -339,6 +353,7 @@ export function renderCamera(root) {
       await refreshSources();
 
       state.running = true;
+      state.sessionId = randomSessionId();
       state.motionTracker.reset();
       state.cryTracker.reset();
       state.lastEvent = { motion: null, cry: null };
@@ -356,6 +371,7 @@ export function renderCamera(root) {
       state.streamer = new CameraStreamer({
         stream: state.stream,
         callsRef: callsCol(cameraId),
+        sessionId: state.sessionId,
         onViewersChange: ({ connected, total }) => {
           el.viewers.hidden = total === 0;
           el.viewers.textContent = connected ? `👁 ${connected} in visione` : '⏳ connessione…';
@@ -379,7 +395,7 @@ export function renderCamera(root) {
     }
   }
 
-  async function stop({ unmount = false } = {}) {
+  async function stop({ unmount = false, takenOver = false } = {}) {
     const wasRunning = state.running;
     state.running = false;
     publishState.cancel();
@@ -392,13 +408,14 @@ export function renderCamera(root) {
     state.motionDet = null;
     await state.cryDet?.stop();
     state.cryDet = null;
-    await state.streamer?.stop();
+    if (takenOver) state.streamer?.stopLocal?.();
+    else await state.streamer?.stop();
     state.streamer = null;
     state.stream?.getTracks().forEach((t) => t.stop());
     state.stream = null;
     el.video.srcObject = null;
     state.wakeLock.release();
-    if (wasRunning) {
+    if (wasRunning && !takenOver) {
       try {
         await S.setDoc(docRef(), {
           status: 'offline', monitoring: false, lastSeen: S.serverTimestamp(),

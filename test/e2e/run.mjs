@@ -111,6 +111,8 @@ const browser = await chromium.launch({
 });
 const context = await browser.newContext({ permissions: ['camera', 'microphone', 'notifications'] });
 await context.route('**/firebasejs/**', (route) => route.fulfill({ path: FAKE, contentType: 'text/javascript' }));
+// Ignora la configurazione reale committata: il test verifica anche la schermata di configurazione.
+await context.route('**/firebase-config.js', (route) => route.fulfill({ body: '', contentType: 'text/javascript' }));
 const consoleErrors = [];
 const attach = (page, name) => {
   page.on('console', (m) => {
@@ -197,6 +199,25 @@ try {
   await waitFor(() => cam.evaluate(() => window.__fakeFirestore.list('users/').filter(([p]) => /\/calls\//.test(p)).length === 0), { label: 'pulizia chiamata' });
   check(true, 'chiamata chiusa e documenti di segnalazione rimossi');
 
+  console.log('5b. Seconda scheda camera sullo stesso dispositivo');
+  const cam2 = await context.newPage();
+  attach(cam2, 'camera2');
+  await cam2.goto(base + '#/camera');
+  await cam2.waitForSelector('#cam-start');
+  await cam2.click('#cam-start');
+  await waitFor(() => cam2.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'seconda scheda in ascolto' });
+  await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'Non attiva'), { label: 'prima scheda fermata' });
+  check(true, 'la scheda precedente si ferma quando un\'altra avvia il monitoraggio');
+  await view.click('#v-start');
+  await waitFor(() => view.$eval('#v-conn', (e) => e.textContent === 'In diretta'), { timeout: 30000, label: 'video dalla seconda scheda' });
+  check(true, 'il video parte dalla nuova scheda camera');
+  await view.click('#v-stop');
+  await waitFor(() => view.$eval('#v-conn', (e) => e.textContent === 'Non connesso'), { label: 'video fermato (2)' });
+  await cam2.click('#cam-stop');
+  await cam2.close();
+  await cam.click('#cam-start');
+  await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'prima scheda riavviata' });
+
   console.log('6. Eventi e stop');
   const eventCount = await cam.evaluate(() => window.__fakeFirestore.list('users/').filter(([p]) => /\/events\//.test(p)).length);
   console.log(`    eventi registrati con il video finto: ${eventCount}`);
@@ -214,6 +235,7 @@ try {
   console.log('8. SDK non raggiungibile: la configurazione salvata resta');
   const offline = await browser.newContext();
   await offline.route('**/firebasejs/**', (route) => route.abort());
+  await offline.route('**/firebase-config.js', (route) => route.fulfill({ body: '', contentType: 'text/javascript' }));
   const off = await offline.newPage();
   await off.goto(base);
   await off.evaluate(() => localStorage.setItem('babymonitor.firebaseConfig', JSON.stringify({ apiKey: 'k', projectId: 'p', appId: 'a' })));
