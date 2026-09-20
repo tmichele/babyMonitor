@@ -5,12 +5,12 @@
 // La chiave API web di Firebase non è un segreto: i dati sono protetti dal login e dalle
 // regole Firestore (firestore.rules).
 window.FIREBASE_CONFIG = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT.firebaseapp.com',
-  projectId: 'YOUR_PROJECT',
-  storageBucket: 'YOUR_PROJECT.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: '1:000000000000:web:0000000000000000',
+  apiKey: 'AIzaSyCV9n3FD9_df0U3fYANPKx9dYcRV1j7CNM',
+  authDomain: 'babymonitor-640f9.firebaseapp.com',
+  projectId: 'babymonitor-640f9',
+  storageBucket: 'babymonitor-640f9.firebasestorage.app',
+  messagingSenderId: '564374747420',
+  appId: '1:564374747420:web:b7b03ffff1f5437f93a2d9',
 };
 
 // Opzionale: server ICE/TURN per il video WebRTC quando i due dispositivi sono su reti diverse.
