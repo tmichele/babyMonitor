@@ -4,7 +4,7 @@ import { S, camerasCol, cameraDoc, eventsCol, callsCol, tsToMillis } from '../fi
 import { MOTION_LABELS, CRY_LABELS, normalizeSettings, scaledThresholds } from '../detection/levels.js';
 import { ViewerStream } from '../rtc.js';
 import { getDeviceId, prefs } from '../config.js';
-import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, levelCardHtml, bindDetails } from '../ui.js';
+import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, levelCardHtml, subpageHtml, showSubpage } from '../ui.js';
 import { beep, vibrate, notify, requestNotifications, notificationsSupported, unlockAudio, WakeLockKeeper } from '../alerts.js';
 import { attachZoom, attachFullscreen } from '../zoom.js';
 import { normalizeBattery, batteryLabel, isLowBattery, LOW_BATTERY } from '../battery.js';
@@ -65,58 +65,53 @@ export function renderViewer(root) {
           <button id="v-mute" class="btn" hidden>🔈 Audio attivo</button>
         </div>
         <p class="muted small" id="v-msg" hidden></p>
-        <p class="muted small">Pizzica o fai doppio tocco per ingrandire, trascina per spostare.</p>
-      </div>
-
-      <div class="card">
-        <h3 class="section-title">🕒 Eventi</h3>
-        <ul id="v-events" class="events"><li class="muted">Nessun evento.</li></ul>
-      </div>
-
-      <div class="card settings-card">
-        <h3 class="section-title">⚙️ Impostazioni</h3>
-        <details class="group" id="grp-alerts">
-          <summary>🔔 Avvisi su questo dispositivo <span class="summary-hint" id="hint-alerts"></span></summary>
-          <div class="group-body">
-            <div class="row">
-              <label class="grow">Movimento da livello
-                <select id="p-motion">${levelOptions(MOTION_LABELS)}</select></label>
-              <label class="grow">Pianto da livello
-                <select id="p-cry">${levelOptions(CRY_LABELS)}</select></label>
-            </div>
-            <label class="check"><input type="checkbox" id="p-sound"> Suono</label>
-            <label class="check"><input type="checkbox" id="p-vibration"> Vibrazione</label>
-            <label class="check"><input type="checkbox" id="p-autovideo"> Avvia il video automaticamente quando scatta un avviso</label>
-            <label class="check"><input type="checkbox" id="p-offline"> Avvisa se la camera va offline</label>
-            <label class="check"><input type="checkbox" id="p-battery"> Avvisa se la batteria della camera è sotto il ${LOW_BATTERY} %</label>
-            <label class="check"><input type="checkbox" id="p-awake"> Tieni lo schermo acceso</label>
-            <div class="actions">
-              <button id="p-notify" class="btn">🔔 Abilita notifiche</button>
-              <button id="p-test" class="btn">Prova avviso</button>
-            </div>
-          </div>
-        </details>
-        <details class="group" id="grp-remote">
-          <summary>🎚️ Sensibilità della camera (remoto) <span class="summary-hint" id="hint-remote"></span></summary>
-          <div class="group-body">
-            <label class="range">Movimento <span id="r-motion-v"></span>
-              <input type="range" id="r-motion" min="1" max="10" step="1"></label>
-            <label class="range">Pianto <span id="r-cry-v"></span>
-              <input type="range" id="r-cry" min="1" max="10" step="1"></label>
-            <label>Registra eventi da livello
-              <select id="r-minlevel">
-                <option value="1">1 · Leggero / Rumore</option>
-                <option value="2">2 · Moderato / Lamento</option>
-                <option value="3">3 · Intenso / Pianto</option>
-              </select>
-            </label>
-            <div class="actions"><button id="r-save" class="btn primary">Invia alla camera</button></div>
-            <p class="muted small" id="r-thresholds"></p>
-          </div>
-        </details>
+        <p class="muted small">Pizzica o fai doppio tocco per ingrandire, trascina per spostare. Eventi e impostazioni dalle icone 🕒 e ⚙️ in alto.</p>
       </div>
     </div>
-  </section>`;
+  </section>
+
+  ${subpageHtml('sub-events', '🕒 Eventi', '#/viewer', `
+    <div class="card">
+      <p class="muted small" id="v-events-cam"></p>
+      <ul id="v-events" class="events"><li class="muted">Nessun evento.</li></ul>
+    </div>`)}
+
+  ${subpageHtml('sub-settings', '⚙️ Impostazioni', '#/viewer', `
+    <div class="card">
+      <h3 class="section-title">🔔 Avvisi su questo dispositivo</h3>
+      <div class="row">
+        <label class="grow">Movimento da livello
+          <select id="p-motion">${levelOptions(MOTION_LABELS)}</select></label>
+        <label class="grow">Pianto da livello
+          <select id="p-cry">${levelOptions(CRY_LABELS)}</select></label>
+      </div>
+      <label class="check"><input type="checkbox" id="p-sound"> Suono</label>
+      <label class="check"><input type="checkbox" id="p-vibration"> Vibrazione</label>
+      <label class="check"><input type="checkbox" id="p-autovideo"> Avvia il video automaticamente quando scatta un avviso</label>
+      <label class="check"><input type="checkbox" id="p-offline"> Avvisa se la camera va offline</label>
+      <label class="check"><input type="checkbox" id="p-battery"> Avvisa se la batteria della camera è sotto il ${LOW_BATTERY} %</label>
+      <label class="check"><input type="checkbox" id="p-awake"> Tieni lo schermo acceso</label>
+      <div class="actions">
+        <button id="p-notify" class="btn">🔔 Abilita notifiche</button>
+        <button id="p-test" class="btn">Prova avviso</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 class="section-title">🎚️ Sensibilità della camera <span class="muted small" id="r-cam-name"></span></h3>
+      <label class="range">Movimento <span id="r-motion-v"></span>
+        <input type="range" id="r-motion" min="1" max="10" step="1"></label>
+      <label class="range">Pianto <span id="r-cry-v"></span>
+        <input type="range" id="r-cry" min="1" max="10" step="1"></label>
+      <label>Registra eventi da livello
+        <select id="r-minlevel">
+          <option value="1">1 · Leggero / Rumore</option>
+          <option value="2">2 · Moderato / Lamento</option>
+          <option value="3">3 · Intenso / Pianto</option>
+        </select>
+      </label>
+      <div class="actions"><button id="r-save" class="btn primary">Invia alla camera</button></div>
+      <p class="muted small" id="r-thresholds"></p>
+    </div>`)}`;
 
   const el = {
     list: $('#cam-list', root),
@@ -154,8 +149,8 @@ export function renderViewer(root) {
     rMinLevel: $('#r-minlevel', root),
     rSave: $('#r-save', root),
     rThresholds: $('#r-thresholds', root),
-    hintAlerts: $('#hint-alerts', root),
-    hintRemote: $('#hint-remote', root),
+    eventsCam: $('#v-events-cam', root),
+    rCamName: $('#r-cam-name', root),
     events: $('#v-events', root),
     motion: { bar: $('#motion-bar', root), label: $('#motion-label', root), meter: $('#motion-meter', root), score: $('#motion-score', root), card: $('#motion-card', root) },
     cry: { bar: $('#cry-bar', root), label: $('#cry-label', root), meter: $('#cry-meter', root), score: $('#cry-score', root), card: $('#cry-card', root) },
@@ -192,7 +187,6 @@ export function renderViewer(root) {
     if (notificationsSupported() && Notification.permission === 'granted') el.pNotify.textContent = '🔔 Notifiche attive';
     if (viewerPrefs.keepAwake) state.wakeLock.request();
     else state.wakeLock.release();
-    el.hintAlerts.textContent = `movimento da liv. ${viewerPrefs.alertMotionLevel} · pianto da liv. ${viewerPrefs.alertCryLevel}${viewerPrefs.sound ? ' · suono' : ''}`;
   }
   function savePrefs() {
     viewerPrefs.alertMotionLevel = Number(el.pMotion.value);
@@ -224,6 +218,7 @@ export function renderViewer(root) {
       : type === 'motion' ? `Movimento: ${MOTION_LABELS[level]}`
         : type === 'battery' ? 'Batteria camera scarica' : 'Baby Monitor';
     showBanner(`${title} · ${message}`, level >= 3 ? 'danger' : 'warn');
+    if (document.body.classList.contains('subpage-open')) toast(`${title} · ${message}`, 'error', 6000);
     if (viewerPrefs.sound) {
       if (type === 'cry') beep({ count: 3, freq: 988, duration: 0.18, gap: 0.09 });
       else if (type === 'motion') beep({ count: 2, freq: 740 });
@@ -322,6 +317,8 @@ export function renderViewer(root) {
     const now = Date.now();
     const online = isOnline(d, now);
     el.name.textContent = d.name || 'Camera';
+    el.eventsCam.textContent = `Camera: ${d.name || 'Camera'}`;
+    el.rCamName.textContent = `(${d.name || 'Camera'})`;
     el.status.textContent = online ? 'online' : 'offline';
     el.status.className = `badge ${online ? 'on' : 'off'}`;
     el.seen.textContent = `Ultimo segnale: ${formatAgo(tsToMillis(d.lastSeen), now)}`;
@@ -406,7 +403,6 @@ export function renderViewer(root) {
     const mt = scaledThresholds(base.motionThresholds, el.rMotion.value).map((t) => t.toFixed(1));
     const ct = scaledThresholds(base.cryThresholds, el.rCry.value).map((t) => t.toFixed(0));
     el.rThresholds.textContent = `Soglie movimento (% pixel): ${mt.join(' / ')} · soglie pianto (punteggio): ${ct.join(' / ')}`;
-    el.hintRemote.textContent = `movimento ${el.rMotion.value} · pianto ${el.rCry.value}`;
   }
   [el.rMotion, el.rCry, el.rMinLevel].forEach((i) => i.addEventListener('input', () => {
     state.remoteDirty = true;
@@ -430,8 +426,6 @@ export function renderViewer(root) {
     }
   });
   updateRemoteLabels();
-  bindDetails($('#grp-alerts', root), 'viewer.alerts', false);
-  bindDetails($('#grp-remote', root), 'viewer.remote', false);
 
   // ----- video -----
   const CONN_LABELS = {
@@ -530,16 +524,20 @@ export function renderViewer(root) {
     // Verrà selezionata appena arriva l'elenco.
   }
 
-  return () => {
-    zoom.destroy();
-    fullscreen.destroy();
-    stopStream();
+  return {
+    onRoute: (sub) => showSubpage(root, { events: 'sub-events', settings: 'sub-settings' }[sub] || null),
+    cleanup: () => {
+      showSubpage(root, null);
+      zoom.destroy();
+      fullscreen.destroy();
+      stopStream();
     state.unsubList?.();
     state.unsubDoc?.();
     state.unsubEvents?.();
-    if (state.staleTimer) clearInterval(state.staleTimer);
-    if (state.bannerTimer) clearTimeout(state.bannerTimer);
-    state.wakeLock.destroy();
+      if (state.staleTimer) clearInterval(state.staleTimer);
+      if (state.bannerTimer) clearTimeout(state.bannerTimer);
+      state.wakeLock.destroy();
+    },
   };
 }
 
