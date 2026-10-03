@@ -61,7 +61,9 @@ if (channel) {
       channel.postMessage({ type: 'sync-response', entries: Array.from(store.entries()) });
     } else if (msg.type === 'sync-response') {
       for (const [path, data] of msg.entries) {
-        if (!store.has(path)) applyOp({ type: 'set', path, data }, false);
+        // Le scritture parziali arrivate nel frattempo sono più recenti: restano sopra lo stato completo.
+        const merged = store.has(path) ? deepMerge(data, store.get(path)) : data;
+        applyOp({ type: 'set', path, data: merged }, false);
       }
     } else {
       applyOp(msg, false);

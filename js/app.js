@@ -12,44 +12,67 @@ import { watchBattery, batteryLabel, batterySupported } from './battery.js';
 
 const appEl = $('#app');
 const topRight = $('#topbar-right');
-let cleanup = null;
+const topbar = $('.topbar');
+let view = null; // { cleanup, onRoute } della vista montata
+let viewKey = null;
 let user; // undefined = stato auth non ancora noto
 let firebaseReady = false;
 let initError = null;
 let battery = null; // batteria di questo dispositivo
 
-function mount(renderFn, opts) {
-  if (cleanup) {
+function unmount() {
+  if (view?.cleanup) {
     try {
-      cleanup();
+      view.cleanup();
     } catch (err) {
       console.error(err);
     }
   }
-  cleanup = null;
-  appEl.innerHTML = '';
-  const result = renderFn(appEl, opts);
-  cleanup = typeof result === 'function' ? result : null;
-  window.scrollTo(0, 0);
+  view = null;
+  viewKey = null;
+}
+
+/** Monta la vista `key`; se è già montata la lascia com'è (le sottopagine cambiano senza smontare). */
+function mount(key, renderFn, sub = '', opts) {
+  if (viewKey !== key) {
+    unmount();
+    appEl.innerHTML = '';
+    const result = renderFn(appEl, opts);
+    view = typeof result === 'function' ? { cleanup: result } : (result || {});
+    viewKey = key;
+    window.scrollTo(0, 0);
+  }
+  view.onRoute?.(sub);
 }
 
 function renderLoading(root) {
   root.innerHTML = '<section class="view narrow"><div class="card center"><div class="spinner"></div><p class="muted">Connessione a Firebase…</p></div></section>';
 }
 
+function parseRoute() {
+  const [main = '', sub = ''] = location.hash.replace(/^#\/?/, '').split('?')[0].split('/');
+  return { main, sub };
+}
 function currentRoute() {
-  return location.hash.replace(/^#\/?/, '').split('?')[0];
+  return parseRoute().main;
 }
 
 function renderTopbar() {
-  const route = currentRoute();
+  const { main: route, sub } = parseRoute();
   const roleBadge = route === 'camera' ? '<span class="badge role">📷 Camera</span>'
     : route === 'viewer' ? '<span class="badge role">📱 Visualizzatore</span>' : '';
+  const navIcon = (key, icon, label) => {
+    const active = sub === key;
+    return `<a class="icon-btn ${active ? 'active' : ''}" id="nav-${key}" href="#/${route}${active ? '' : `/${key}`}" title="${label}" aria-label="${label}" aria-pressed="${active}">${icon}</a>`;
+  };
+  const nav = user && (route === 'camera' || route === 'viewer')
+    ? navIcon('events', '🕒', 'Eventi') + navIcon('settings', '⚙️', 'Impostazioni')
+    : '';
   const batteryBadge = batterySupported()
     ? `<span class="badge battery ${battery && !battery.charging && battery.level <= 20 ? 'low' : ''}" id="topbar-battery" title="Batteria di questo dispositivo">${batteryLabel(battery)}</span>`
     : '';
   topRight.innerHTML = user
-    ? `${roleBadge}${batteryBadge}<span class="user muted" title="${escapeHtml(user.email || '')}">${escapeHtml(user.email || '')}</span>
+    ? `${roleBadge}${batteryBadge}${nav}<span class="user muted" title="${escapeHtml(user.email || '')}">${escapeHtml(user.email || '')}</span>
        <button id="btn-logout" class="btn small">Esci</button>`
     : (firebaseReady ? batteryBadge : '<a class="btn small" href="#/setup">Configura</a>');
   $('#btn-logout', topRight)?.addEventListener('click', async () => {
@@ -60,20 +83,24 @@ function renderTopbar() {
 }
 
 function route() {
-  const r = currentRoute();
+  const { main: r, sub } = parseRoute();
   renderTopbar();
-  if (r === 'setup' || !firebaseReady) return mount(renderSetup, { error: initError });
-  if (user === undefined) return mount(renderLoading);
-  if (!user) return mount(renderAuth);
-  if (r === 'camera') return mount(renderCamera);
-  if (r === 'viewer') return mount(renderViewer);
-  return mount(renderHome);
+  if (r === 'setup' || !firebaseReady) return mount('setup', renderSetup, '', { error: initError });
+  if (user === undefined) return mount('loading', renderLoading);
+  if (!user) return mount('auth', renderAuth);
+  if (r === 'camera') return mount('camera', renderCamera, sub);
+  if (r === 'viewer') return mount('viewer', renderViewer, sub);
+  return mount('home', renderHome);
 }
 
 async function boot() {
   const config = loadFirebaseConfig();
   document.addEventListener('pointerdown', unlockAudio, { once: true });
   registerServiceWorker();
+  // Altezza della barra, usata dalle sottopagine per posizionarsi sotto di essa.
+  const setTopbarHeight = () => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
+  setTopbarHeight();
+  if ('ResizeObserver' in window) new ResizeObserver(setTopbarHeight).observe(topbar);
   watchBattery((b) => {
     battery = b;
     renderTopbar();
@@ -84,7 +111,7 @@ async function boot() {
     window.addEventListener('hashchange', route);
     return;
   }
-  mount(renderLoading);
+  mount('loading', renderLoading);
   try {
     await initFirebase(config);
     firebaseReady = true;
@@ -98,6 +125,7 @@ async function boot() {
     A.onAuthStateChanged(auth, (u) => {
       const wasKnown = user !== undefined;
       user = u;
+      unmount(); // cambio utente: la vista va ricostruita
       if (!u && wasKnown && currentRoute() !== '') location.hash = '#/';
       route();
     });

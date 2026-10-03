@@ -56,7 +56,12 @@ async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 }
 
-const openGroups = (page) => page.$$eval('details.group', (ds) => ds.forEach((d) => { d.open = true; }));
+// Apre (sub = 'settings' | 'events') o chiude (sub = '') la sottopagina della vista `main`.
+async function goSub(page, main, sub) {
+  await page.evaluate(([m, s]) => { location.hash = s ? `#/${m}/${s}` : `#/${m}`; }, [main, sub]);
+  if (sub) await page.waitForSelector(`#sub-${sub}:not([hidden])`);
+  else await page.waitForFunction(() => !document.body.classList.contains('subpage-open'));
+}
 
 const failures = [];
 function check(cond, msg) {
@@ -146,9 +151,13 @@ try {
   console.log('2. Camera');
   await cam.click('a[href="#/camera"]');
   await cam.waitForSelector('#cam-start');
-  await openGroups(cam);
+  await cam.click('#nav-settings');
+  await cam.waitForSelector('#sub-settings:not([hidden])');
+  check(true, 'icona ⚙️ apre la pagina impostazioni della camera');
+  await shot(cam, '04a-camera-settings');
   await cam.fill('#cam-name', 'Cameretta');
   await cam.dispatchEvent('#cam-name', 'change');
+  await goSub(cam, 'camera', '');
   await cam.click('#cam-start');
   await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'stato In ascolto' });
   check(true, 'monitoraggio avviato');
@@ -182,7 +191,6 @@ try {
   attach(view, 'viewer');
   await view.goto(base + '#/viewer');
   await view.waitForSelector('.cam-item');
-  await openGroups(view);
   check(await view.$eval('.cam-name', (e) => e.textContent) === 'Cameretta', 'camera elencata');
   await waitFor(() => view.$eval('#d-status', (e) => e.textContent === 'online'), { label: 'camera online nel dettaglio' });
   check(true, 'dettaglio camera online (selezione automatica)');
@@ -191,12 +199,19 @@ try {
   await waitFor(() => view.$eval('#cry-score', (e) => /punteggio \d+/.test(e.textContent)), { label: 'livelli sincronizzati' });
   check(true, 'livelli ricevuti dal visualizzatore');
 
-  console.log('4. Sensibilità remota');
+  console.log('4. Sensibilità remota (pagina impostazioni)');
+  await goSub(view, 'viewer', 'settings');
   await view.fill('#r-motion', '8');
   await view.dispatchEvent('#r-motion', 'input');
   await view.click('#r-save');
   await waitFor(() => cam.$eval('#set-motion', (e) => e.value === '8'), { label: 'sensibilità applicata sulla camera' });
   check(true, 'la camera applica la sensibilità inviata dal visualizzatore');
+  check(await cam.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), 'la camera continua a monitorare mentre le impostazioni sono aperte');
+  await goSub(view, 'viewer', 'events');
+  await waitFor(() => view.$$eval('#v-events li[data-level]', (els) => els.length > 0), { label: 'eventi nella pagina eventi' });
+  check(true, 'la pagina eventi del visualizzatore elenca gli eventi');
+  await shot(view, '05a-viewer-events');
+  await goSub(view, 'viewer', '');
 
   console.log('5. Video WebRTC');
   const autoStarted = await view.$eval('#v-conn', (e) => e.textContent !== 'Non connesso');
@@ -246,7 +261,9 @@ try {
   attach(cam2, 'camera2');
   await cam2.goto(base + '#/camera');
   await cam2.waitForSelector('#cam-start');
+  await goSub(view, 'viewer', 'settings');
   await view.uncheck('#p-autovideo');
+  await goSub(view, 'viewer', '');
   await cam2.click('#cam-start');
   await waitFor(() => cam2.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'seconda scheda in ascolto' });
   await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'Non attiva'), { label: 'prima scheda fermata' });
@@ -290,6 +307,16 @@ try {
 } catch (err) {
   failures.push(err.message);
   console.log(`  ✗ ${err.message}`);
+  if (SHOTS) {
+    let i = 0;
+    for (const p of context.pages()) {
+      try {
+        await p.screenshot({ path: path.join(SHOTS, `fail-${i++}.png`), fullPage: false });
+      } catch {
+        /* pagina chiusa */
+      }
+    }
+  }
 } finally {
   await browser.close();
   server.close();

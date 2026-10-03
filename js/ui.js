@@ -104,21 +104,28 @@ export function levelCardHtml(prefix, title, icon) {
   </div>`;
 }
 
-/** Ricorda lo stato aperto/chiuso di un <details> nel browser. */
-export function bindDetails(el, key, defaultOpen = false) {
-  if (!el) return;
-  const storageKey = `babymonitor.details.${key}`;
-  try {
-    const saved = localStorage.getItem(storageKey);
-    el.open = saved == null ? defaultOpen : saved === '1';
-  } catch {
-    el.open = defaultOpen;
-  }
-  el.addEventListener('toggle', () => {
-    try {
-      localStorage.setItem(storageKey, el.open ? '1' : '0');
-    } catch {
-      /* ignora */
+/** Pagina secondaria (eventi, impostazioni) che si apre sopra la vista principale senza smontarla. */
+export function subpageHtml(id, title, backHref, bodyHtml) {
+  return `<div class="subpage" id="${id}" hidden>
+    <div class="subpage-inner">
+      <div class="subpage-head">
+        <a class="btn small" href="${backHref}">← Indietro</a>
+        <h2>${title}</h2>
+      </div>
+      ${bodyHtml}
+    </div>
+  </div>`;
+}
+
+export function showSubpage(root, id) {
+  let shown = false;
+  $$('.subpage', root).forEach((el) => {
+    const on = el.id === id;
+    el.hidden = !on;
+    if (on) {
+      shown = true;
+      el.scrollTop = 0;
     }
   });
+  document.body.classList.toggle('subpage-open', shown);
 }
