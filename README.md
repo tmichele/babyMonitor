@@ -22,6 +22,7 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
 | Video live | WebRTC (audio + video) con segnalazione via Firestore; STUN di Google di default, TURN opzionale. |
 | Avvisi | Banner, beep, vibrazione e notifiche di sistema quando movimento/pianto superano il livello scelto; avviso se la camera va offline. |
 | Solo audio in background | Su Android, a schermo spento o con l'app in secondo piano, l'analisi del pianto gira in un AudioWorklet e continua insieme all'audio in diretta; il visualizzatore mostra "solo audio" e il movimento riprende quando lo schermo si riaccende. |
+| Batteria | Livello del dispositivo locale sempre nella barra in alto; la camera pubblica il proprio e il visualizzatore lo mostra in elenco e dettaglio, con avviso sotto il 15 % se non in carica (Battery Status API: Chrome/Android; su iPhone e Firefox "n/d"). |
 | Avvio automatico del video | Il visualizzatore può aprire da solo il video in diretta quando scatta un avviso di pianto o movimento. |
 | Comodità | Schermo tenuto acceso (Wake Lock, disattivabile), modalità "schermo scuro" per la notte, zoom e schermo intero sul video, scelta della videocamera, PWA installabile. |
 

@@ -156,6 +156,12 @@ try {
   check(camDoc.name === 'Cameretta', `documento camera pubblicato con nome (${camDoc.name})`);
   check(camDoc.status === 'online' && camDoc.monitoring === true, 'stato online');
   check(camDoc.settings && camDoc.settings.motionSensitivity === 5, 'impostazioni pubblicate');
+  const camBattery = await waitFor(() => cam.evaluate(() => {
+    const entries = window.__fakeFirestore.list('users/').filter(([p]) => /^users\/[^/]+\/cameras\/[^/]+$/.test(p));
+    return entries.length && entries[0][1].battery ? entries[0][1].battery : null;
+  }), { label: 'batteria pubblicata' });
+  check(Number.isFinite(camBattery.level), `batteria della camera pubblicata (${camBattery.level}%, in carica: ${camBattery.charging})`);
+  check(/%/.test(await cam.$eval('#topbar-battery', (e) => e.textContent)), 'batteria locale nella barra in alto');
   await waitFor(() => cam.$eval('#motion-score', (e) => /pixel/.test(e.textContent)), { label: 'punteggio movimento' });
   await waitFor(() => cam.$eval('#cry-score', (e) => /punteggio/.test(e.textContent)), { label: 'punteggio pianto' });
   check(true, 'rilevatori movimento e pianto attivi');
@@ -176,6 +182,8 @@ try {
   check(await view.$eval('.cam-name', (e) => e.textContent) === 'Cameretta', 'camera elencata');
   await waitFor(() => view.$eval('#d-status', (e) => e.textContent === 'online'), { label: 'camera online nel dettaglio' });
   check(true, 'dettaglio camera online (selezione automatica)');
+  await waitFor(() => view.$eval('#d-battery', (e) => !e.hidden && /%/.test(e.textContent)), { label: 'batteria remota nel dettaglio' });
+  check(/%/.test(await view.$eval('.cam-meta', (e) => e.textContent)), 'batteria remota nell\'elenco camere');
   await waitFor(() => view.$eval('#cry-score', (e) => /punteggio \d+/.test(e.textContent)), { label: 'livelli sincronizzati' });
   check(true, 'livelli ricevuti dal visualizzatore');
 

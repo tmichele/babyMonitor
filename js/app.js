@@ -8,6 +8,7 @@ import { renderCamera } from './views/camera.js';
 import { renderViewer } from './views/viewer.js';
 import { $, toast, escapeHtml } from './ui.js';
 import { unlockAudio, registerServiceWorker } from './alerts.js';
+import { watchBattery, batteryLabel, batterySupported } from './battery.js';
 
 const appEl = $('#app');
 const topRight = $('#topbar-right');
@@ -15,6 +16,7 @@ let cleanup = null;
 let user; // undefined = stato auth non ancora noto
 let firebaseReady = false;
 let initError = null;
+let battery = null; // batteria di questo dispositivo
 
 function mount(renderFn, opts) {
   if (cleanup) {
@@ -43,10 +45,13 @@ function renderTopbar() {
   const route = currentRoute();
   const roleBadge = route === 'camera' ? '<span class="badge role">📷 Camera</span>'
     : route === 'viewer' ? '<span class="badge role">📱 Visualizzatore</span>' : '';
+  const batteryBadge = batterySupported()
+    ? `<span class="badge battery ${battery && !battery.charging && battery.level <= 20 ? 'low' : ''}" id="topbar-battery" title="Batteria di questo dispositivo">${batteryLabel(battery)}</span>`
+    : '';
   topRight.innerHTML = user
-    ? `${roleBadge}<span class="user muted" title="${escapeHtml(user.email || '')}">${escapeHtml(user.email || '')}</span>
+    ? `${roleBadge}${batteryBadge}<span class="user muted" title="${escapeHtml(user.email || '')}">${escapeHtml(user.email || '')}</span>
        <button id="btn-logout" class="btn small">Esci</button>`
-    : (firebaseReady ? '' : '<a class="btn small" href="#/setup">Configura</a>');
+    : (firebaseReady ? batteryBadge : '<a class="btn small" href="#/setup">Configura</a>');
   $('#btn-logout', topRight)?.addEventListener('click', async () => {
     if (route === 'camera' && !confirm('Uscendo il monitoraggio si ferma. Continuare?')) return;
     await A.signOut(auth);
@@ -69,6 +74,10 @@ async function boot() {
   const config = loadFirebaseConfig();
   document.addEventListener('pointerdown', unlockAudio, { once: true });
   registerServiceWorker();
+  watchBattery((b) => {
+    battery = b;
+    renderTopbar();
+  });
 
   if (!config) {
     route();
