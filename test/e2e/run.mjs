@@ -192,6 +192,17 @@ try {
   const dims = await waitFor(() => view.$eval('#v-video', (v) => (v.videoWidth > 0 ? [v.videoWidth, v.videoHeight] : null)), { label: 'frame video' });
   check(dims[0] > 0, `il visualizzatore riceve video ${dims[0]}x${dims[1]}`);
   await shot(view, '05-viewer-live');
+  await view.click('#z-in');
+  check((await view.$eval('#v-video', (v) => v.style.transform)).includes('scale(1.5)'), 'zoom + ingrandisce il video');
+  await view.dblclick('#v-video');
+  await view.waitForTimeout(100);
+  check(await view.$eval('#z-level', (e) => e.textContent) === '1×', 'doppio tocco su video ingrandito ripristina lo zoom');
+  await view.click('#z-fs');
+  await waitFor(() => view.$eval('#v-preview', (e) => e.classList.contains('fs-active') || e.classList.contains('fs-fallback')), { label: 'schermo intero' });
+  check(true, 'schermo intero attivato');
+  await view.click('#z-fs');
+  await waitFor(() => view.$eval('#v-preview', (e) => !e.classList.contains('fs-active') && !e.classList.contains('fs-fallback')), { label: 'uscita schermo intero' });
+  check(true, 'uscita da schermo intero');
   await waitFor(() => cam.$eval('#cam-viewers', (e) => !e.hidden && /1 in visione/.test(e.textContent)), { label: 'contatore visualizzatori' });
   check(true, 'la camera conta 1 visualizzatore');
   await view.click('#v-stop');
