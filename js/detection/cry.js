@@ -19,6 +19,28 @@ export function rmsToDb(rms) {
   return rms > 0 ? 20 * Math.log10(rms) : -100;
 }
 
+/** RMS 0..1 da campioni float (-1..1). */
+export function rmsFromFloat(samples) {
+  if (!samples || !samples.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / samples.length);
+}
+
+/**
+ * Converte ampiezze lineari (1 = fondo scala) in valori 0..255 su scala dB, come fa
+ * AnalyserNode.getByteFrequencyData (minDecibels -100, maxDecibels -30).
+ */
+export function magnitudesToBytes(mags, out, minDb = -100, maxDb = -30) {
+  const o = out && out.length === mags.length ? out : new Uint8Array(mags.length);
+  const span = maxDb - minDb;
+  for (let i = 0; i < mags.length; i++) {
+    const db = mags[i] > 0 ? 20 * Math.log10(mags[i]) : -200;
+    o[i] = clamp(Math.round(((db - minDb) / span) * 255), 0, 255);
+  }
+  return o;
+}
+
 /**
  * Analizza lo spettro (getByteFrequencyData, 0..255).
  * bandRatio: quota di energia nella banda del pianto; peakiness: quanto lo spettro in banda
@@ -59,39 +81,73 @@ export function cryScore({ db, bandRatio, peakiness }, { minDb = -60, maxDb = -1
 
 /**
  * Analizza in tempo reale l'audio di un MediaStream.
- * onUpdate({ score, smoothed, db, bandRatio, peakiness, freqData }).
+ * Usa un AudioWorklet (gira sul thread audio: continua anche con la scheda in background o
+ * lo schermo spento su Android); se non disponibile ripiega su AnalyserNode + timer.
+ * onUpdate({ score, smoothed, db, bandRatio, peakiness }).
  */
 export class CryDetector {
-  constructor(stream, { intervalMs = 100, alpha = 0.35, fftSize = 2048, onUpdate = () => {} } = {}) {
+  constructor(stream, { intervalMs = 100, alpha = 0.35, fftSize = 2048, useWorklet = true, onUpdate = () => {} } = {}) {
     this.stream = stream;
     this.intervalMs = intervalMs;
     this.alpha = alpha;
     this.fftSize = fftSize;
+    this.useWorklet = useWorklet;
     this.onUpdate = onUpdate;
     this.ctx = null;
     this.source = null;
     this.analyser = null;
+    this.worklet = null;
     this.timer = null;
     this.smoothed = null;
     this.freqData = null;
     this.timeData = null;
+    this.engine = null;
   }
 
   async start() {
-    if (this.timer) return;
+    if (this.timer || this.worklet) return;
     if (!this.stream.getAudioTracks().length) throw new Error('Nessuna traccia audio disponibile');
     const Ctx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new Ctx();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
     this.source = this.ctx.createMediaStreamSource(this.stream);
+    this.smoothed = null;
+    if (this.useWorklet && this.ctx.audioWorklet) {
+      try {
+        await this.startWorklet();
+        return;
+      } catch (err) {
+        console.warn('AudioWorklet non disponibile, uso AnalyserNode', err);
+      }
+    }
+    this.startAnalyser();
+  }
+
+  async startWorklet() {
+    await this.ctx.audioWorklet.addModule(new URL('./cry-worklet.js', import.meta.url));
+    const everyFrames = Math.max(1, Math.round((this.intervalMs / 1000) * this.ctx.sampleRate / this.fftSize));
+    this.worklet = new AudioWorkletNode(this.ctx, 'cry-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: { fftSize: this.fftSize, everyFrames },
+    });
+    this.worklet.port.onmessage = (e) => this.handle(e.data);
+    this.source.connect(this.worklet);
+    // L'uscita è silenziosa: il collegamento alla destinazione serve solo a tenere attivo il nodo.
+    this.worklet.connect(this.ctx.destination);
+    this.engine = 'worklet';
+  }
+
+  startAnalyser() {
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = this.fftSize;
     this.analyser.smoothingTimeConstant = 0.6;
     this.source.connect(this.analyser);
     this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
     this.timeData = new Uint8Array(this.analyser.fftSize);
-    this.smoothed = null;
     this.timer = setInterval(() => this.tick(), this.intervalMs);
+    this.engine = 'analyser';
   }
 
   tick() {
@@ -100,14 +156,24 @@ export class CryDetector {
     this.analyser.getByteTimeDomainData(this.timeData);
     const db = rmsToDb(rmsFromTimeDomain(this.timeData));
     const { bandRatio, peakiness } = analyzeSpectrum(this.freqData, this.ctx.sampleRate, this.fftSize);
-    const score = cryScore({ db, bandRatio, peakiness });
+    this.handle({ score: cryScore({ db, bandRatio, peakiness }), db, bandRatio, peakiness });
+  }
+
+  handle({ score, db, bandRatio, peakiness }) {
     this.smoothed = ema(this.smoothed, score, this.alpha);
-    this.onUpdate({ score, smoothed: this.smoothed, db, bandRatio, peakiness, freqData: this.freqData });
+    this.onUpdate({ score, smoothed: this.smoothed, db, bandRatio, peakiness });
   }
 
   async stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    try {
+      this.worklet?.port.postMessage('stop');
+      this.worklet?.disconnect();
+    } catch {
+      /* ignora */
+    }
+    this.worklet = null;
     try {
       this.source?.disconnect();
     } catch {

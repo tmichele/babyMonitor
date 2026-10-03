@@ -8,7 +8,7 @@ import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, le
 import { beep, vibrate, notify, requestNotifications, notificationsSupported, unlockAudio, WakeLockKeeper } from '../alerts.js';
 import { attachZoom, attachFullscreen } from '../zoom.js';
 
-const OFFLINE_AFTER_MS = 60000;
+const OFFLINE_AFTER_MS = 90000;
 
 const DEFAULT_PREFS = {
   alertMotionLevel: 2,
@@ -17,6 +17,7 @@ const DEFAULT_PREFS = {
   vibration: true,
   offlineAlert: true,
   keepAwake: false,
+  autoVideo: true,
 };
 
 export function renderViewer(root) {
@@ -75,6 +76,7 @@ export function renderViewer(root) {
         <label class="check"><input type="checkbox" id="p-sound"> Suono</label>
         <label class="check"><input type="checkbox" id="p-vibration"> Vibrazione</label>
         <label class="check"><input type="checkbox" id="p-offline"> Avvisa se la camera va offline</label>
+        <label class="check"><input type="checkbox" id="p-autovideo"> Avvia il video automaticamente quando scatta un avviso</label>
         <label class="check"><input type="checkbox" id="p-awake"> Tieni lo schermo acceso</label>
         <div class="actions">
           <button id="p-notify" class="btn">🔔 Abilita notifiche</button>
@@ -129,6 +131,7 @@ export function renderViewer(root) {
     pSound: $('#p-sound', root),
     pVibration: $('#p-vibration', root),
     pOffline: $('#p-offline', root),
+    pAutoVideo: $('#p-autovideo', root),
     pAwake: $('#p-awake', root),
     pNotify: $('#p-notify', root),
     pTest: $('#p-test', root),
@@ -167,6 +170,7 @@ export function renderViewer(root) {
     el.pSound.checked = !!viewerPrefs.sound;
     el.pVibration.checked = !!viewerPrefs.vibration;
     el.pOffline.checked = !!viewerPrefs.offlineAlert;
+    el.pAutoVideo.checked = !!viewerPrefs.autoVideo;
     el.pAwake.checked = !!viewerPrefs.keepAwake;
     el.pNotify.hidden = !notificationsSupported();
     if (notificationsSupported() && Notification.permission === 'granted') el.pNotify.textContent = '🔔 Notifiche attive';
@@ -179,11 +183,12 @@ export function renderViewer(root) {
     viewerPrefs.sound = el.pSound.checked;
     viewerPrefs.vibration = el.pVibration.checked;
     viewerPrefs.offlineAlert = el.pOffline.checked;
+    viewerPrefs.autoVideo = el.pAutoVideo.checked;
     viewerPrefs.keepAwake = el.pAwake.checked;
     prefs.setViewerPrefs(viewerPrefs);
     applyPrefsToUi();
   }
-  [el.pMotion, el.pCry, el.pSound, el.pVibration, el.pOffline, el.pAwake].forEach((i) => i.addEventListener('change', savePrefs));
+  [el.pMotion, el.pCry, el.pSound, el.pVibration, el.pOffline, el.pAutoVideo, el.pAwake].forEach((i) => i.addEventListener('change', savePrefs));
   el.pNotify.addEventListener('click', async () => {
     const res = await requestNotifications();
     if (res === 'granted') toast('Notifiche abilitate', 'ok');
@@ -206,6 +211,10 @@ export function renderViewer(root) {
     }
     if (viewerPrefs.vibration) vibrate(type === 'cry' ? [300, 100, 300, 100, 300] : [200, 100, 200]);
     notify(title, message);
+    if (viewerPrefs.autoVideo && (type === 'cry' || type === 'motion') && !state.stream && !el.vStart.disabled) {
+      showMsg('Avvio automatico del video per l\'avviso…');
+      startStream();
+    }
   }
 
   function showBanner(text, kind) {
@@ -238,7 +247,7 @@ export function renderViewer(root) {
         <span class="cam-name">${escapeHtml(d.name || 'Camera')}</span>
         <span class="cam-meta muted">${online ? 'online' : `offline · ${formatAgo(tsToMillis(d.lastSeen), now)}`}</span>
         <span class="chips">
-          <span class="chip" data-level="${online ? d.motion?.level || 0 : 0}">🏃 ${MOTION_LABELS[online ? d.motion?.level || 0 : 0]}</span>
+          <span class="chip" data-level="${online && d.mode !== 'audio-only' ? d.motion?.level || 0 : 0}">🏃 ${online && d.mode === 'audio-only' ? 'solo audio' : MOTION_LABELS[online ? d.motion?.level || 0 : 0]}</span>
           <span class="chip" data-level="${online ? d.cry?.level || 0 : 0}">🔊 ${CRY_LABELS[online ? d.cry?.level || 0 : 0]}</span>
         </span>
       </button>`;
@@ -297,15 +306,22 @@ export function renderViewer(root) {
     el.status.className = `badge ${online ? 'on' : 'off'}`;
     el.seen.textContent = `Ultimo segnale: ${formatAgo(tsToMillis(d.lastSeen), now)}`;
 
-    const motion = online ? d.motion || { score: 0, level: 0 } : { score: 0, level: 0 };
+    const audioOnly = online && d.mode === 'audio-only';
+    const motion = online && !audioOnly ? d.motion || { score: 0, level: 0 } : { score: 0, level: 0 };
     const cry = online ? d.cry || { score: 0, level: 0 } : { score: 0, level: 0 };
+    el.status.textContent = online ? (audioOnly ? 'online · solo audio' : 'online') : 'offline';
     const settings = normalizeSettings(d.settings);
     const mThr = scaledThresholds(settings.motionThresholds, settings.motionSensitivity);
 
     setLevel(el.motion.bar, el.motion.label, motion.level, MOTION_LABELS);
     el.motion.card.dataset.level = motion.level;
     setMeter(el.motion.meter, Math.min(100, ((motion.score || 0) / mThr[2]) * 75));
-    el.motion.score.textContent = `${Number(motion.score || 0).toFixed(1)} % pixel in movimento`;
+    if (audioOnly) {
+      el.motion.label.textContent = 'Non disponibile';
+      el.motion.score.textContent = 'schermo della camera spento: solo audio';
+    } else {
+      el.motion.score.textContent = `${Number(motion.score || 0).toFixed(1)} % pixel in movimento`;
+    }
 
     setLevel(el.cry.bar, el.cry.label, cry.level, CRY_LABELS);
     el.cry.card.dataset.level = cry.level;
@@ -313,7 +329,7 @@ export function renderViewer(root) {
     el.cry.score.textContent = `punteggio ${Math.round(cry.score || 0)}`;
 
     if (online) {
-      if (motion.level >= viewerPrefs.alertMotionLevel) fireAlert('motion', motion.level, `${d.name || 'Camera'} · ${formatTime(now)}`);
+      if (!audioOnly && motion.level >= viewerPrefs.alertMotionLevel) fireAlert('motion', motion.level, `${d.name || 'Camera'} · ${formatTime(now)}`);
       else if (motion.level < viewerPrefs.alertMotionLevel) state.lastAlert.motion = 0;
       if (cry.level >= viewerPrefs.alertCryLevel) fireAlert('cry', cry.level, `${d.name || 'Camera'} · ${formatTime(now)}`);
       else if (cry.level < viewerPrefs.alertCryLevel) state.lastAlert.cry = 0;

@@ -159,6 +159,7 @@ try {
   await waitFor(() => cam.$eval('#motion-score', (e) => /pixel/.test(e.textContent)), { label: 'punteggio movimento' });
   await waitFor(() => cam.$eval('#cry-score', (e) => /punteggio/.test(e.textContent)), { label: 'punteggio pianto' });
   check(true, 'rilevatori movimento e pianto attivi');
+  check(await cam.$eval('#cry-card', (e) => e.dataset.engine) === 'worklet', 'analisi del pianto su AudioWorklet');
   await waitFor(() => cam.$eval('#cry-label', (e) => Number(e.dataset.level) >= 1), { label: 'livello pianto ≥ 1 con il tono armonico' });
   check(true, 'il tono armonico simulato viene classificato almeno come Rumore');
   const motionText = await cam.$eval('#motion-score', (e) => e.textContent);
@@ -186,7 +187,9 @@ try {
   check(true, 'la camera applica la sensibilità inviata dal visualizzatore');
 
   console.log('5. Video WebRTC');
-  await view.click('#v-start');
+  const autoStarted = await view.$eval('#v-conn', (e) => e.textContent !== 'Non connesso');
+  check(autoStarted, 'il video è partito automaticamente con l\'avviso di pianto');
+  if (!autoStarted) await view.click('#v-start');
   await waitFor(() => view.$eval('#v-conn', (e) => e.textContent === 'In diretta'), { timeout: 30000, label: 'video in diretta' });
   check(true, 'connessione WebRTC stabilita');
   const dims = await waitFor(() => view.$eval('#v-video', (v) => (v.videoWidth > 0 ? [v.videoWidth, v.videoHeight] : null)), { label: 'frame video' });
@@ -210,11 +213,28 @@ try {
   await waitFor(() => cam.evaluate(() => window.__fakeFirestore.list('users/').filter(([p]) => /\/calls\//.test(p)).length === 0), { label: 'pulizia chiamata' });
   check(true, 'chiamata chiusa e documenti di segnalazione rimossi');
 
+  console.log('4b. Modalità solo audio (schermo spento simulato)');
+  await cam.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await waitFor(() => view.$eval('#motion-label', (e) => e.textContent === 'Non disponibile'), { label: 'movimento non disponibile sul visualizzatore' });
+  check(true, 'con la camera in background il visualizzatore mostra "solo audio"');
+  await waitFor(() => view.$eval('#d-status', (e) => /solo audio/.test(e.textContent)), { label: 'stato solo audio' });
+  check(await cam.$eval('#cry-label', (e) => Number(e.dataset.level) >= 1), 'la rilevazione del pianto continua in solo audio');
+  await cam.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await waitFor(() => view.$eval('#motion-label', (e) => e.textContent !== 'Non disponibile'), { label: 'movimento di nuovo disponibile' });
+  check(true, 'tornando in primo piano il movimento riprende');
+
   console.log('5b. Seconda scheda camera sullo stesso dispositivo');
   const cam2 = await context.newPage();
   attach(cam2, 'camera2');
   await cam2.goto(base + '#/camera');
   await cam2.waitForSelector('#cam-start');
+  await view.uncheck('#p-autovideo');
   await cam2.click('#cam-start');
   await waitFor(() => cam2.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'seconda scheda in ascolto' });
   await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'Non attiva'), { label: 'prima scheda fermata' });

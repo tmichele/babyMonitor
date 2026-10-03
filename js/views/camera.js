@@ -41,7 +41,10 @@ export function renderCamera(root) {
         <button id="cam-stop" class="btn danger big" hidden>■ Ferma</button>
         <button id="cam-dark" class="btn" hidden>🌙 Schermo scuro</button>
       </div>
-      <p class="muted small">Il monitoraggio continua solo con questa scheda in primo piano. Lo schermo viene tenuto acceso; usa "Schermo scuro" di notte.</p>
+      <label class="check"><input type="checkbox" id="cam-keep-on"> Tieni lo schermo acceso (usa "Schermo scuro" di notte)</label>
+      <p class="muted small">Su Android, con lo schermo spento o l'app in secondo piano, la rilevazione del <b>pianto</b> e l'audio in diretta continuano
+      (modalità <b>solo audio</b>); il <b>movimento</b> riprende quando riaccendi lo schermo. Su iPhone il monitoraggio si ferma a schermo spento:
+      lascia lo schermo acceso.</p>
     </div>
 
     <div class="grid-2">
@@ -84,6 +87,7 @@ export function renderCamera(root) {
     video: $('#cam-video', root),
     overlay: $('#cam-overlay', root),
     status: $('#cam-status', root),
+    keepOn: $('#cam-keep-on', root),
     viewers: $('#cam-viewers', root),
     start: $('#cam-start', root),
     stop: $('#cam-stop', root),
@@ -105,6 +109,8 @@ export function renderCamera(root) {
   const state = {
     running: false,
     sessionId: null,
+    audioOnly: false,
+    lastHeartbeat: 0,
     stream: null,
     motionDet: null,
     cryDet: null,
@@ -222,12 +228,15 @@ export function renderCamera(root) {
     state.stream = next;
     el.video.srcObject = next;
     state.streamer?.replaceStream(next);
+    watchVideoTrack();
+    updateMode();
     await restartCryDetector();
     old?.getTracks().forEach((t) => t.stop());
   }
 
   // ----- rilevazione -----
   function onMotion({ smoothed }) {
+    if (state.audioOnly) return;
     const thr = scaledThresholds(settings.motionThresholds, settings.motionSensitivity);
     const level = state.motionTracker.update(scoreToLevel(smoothed, thr));
     const changed = level !== state.motion.level;
@@ -255,6 +264,48 @@ export function renderCamera(root) {
     maybeLogEvent('cry', level, state.cry.score);
     if (changed) publishStateNow();
     else publishState();
+    if (Date.now() - state.lastHeartbeat > HEARTBEAT_MS) heartbeat();
+  }
+
+  // ----- modalità solo audio (schermo spento / app in secondo piano) -----
+  function videoTrack() {
+    return state.stream?.getVideoTracks()[0] || null;
+  }
+
+  function updateMode() {
+    if (!state.running) return;
+    const track = videoTrack();
+    const audioOnly = document.visibilityState === 'hidden' || !!track?.muted || !track;
+    if (audioOnly === state.audioOnly) return;
+    state.audioOnly = audioOnly;
+    if (audioOnly) {
+      state.motionTracker.reset();
+      state.motion = { score: 0, level: 0, unavailable: true };
+      setLevel(el.motion.bar, el.motion.label, 0, MOTION_LABELS);
+      el.motion.label.textContent = 'Non disponibile';
+      el.motion.card.dataset.level = 0;
+      setMeter(el.motion.meter, 0);
+      el.motion.score.textContent = 'video sospeso: solo audio';
+      el.status.textContent = 'In ascolto (solo audio)';
+    } else {
+      state.motion = { score: 0, level: 0 };
+      el.status.textContent = 'In ascolto';
+    }
+    S.setDoc(docRef(), { mode: audioOnly ? 'audio-only' : 'full', motion: state.motion, lastSeen: S.serverTimestamp() }, { merge: true }).catch(() => {});
+  }
+
+  function watchVideoTrack() {
+    const track = videoTrack();
+    if (!track) return;
+    track.addEventListener('mute', updateMode);
+    track.addEventListener('unmute', updateMode);
+    track.addEventListener('ended', updateMode);
+  }
+
+  function heartbeat() {
+    if (!state.running) return;
+    state.lastHeartbeat = Date.now();
+    S.setDoc(docRef(), { status: 'online', monitoring: true, lastSeen: S.serverTimestamp() }, { merge: true }).catch(() => {});
   }
 
   async function restartCryDetector() {
@@ -262,6 +313,7 @@ export function renderCamera(root) {
     state.cryDet = new CryDetector(state.stream, { onUpdate: onCry });
     try {
       await state.cryDet.start();
+      el.cry.card.dataset.engine = state.cryDet.engine || '';
     } catch (err) {
       toast(`Audio non disponibile: ${err.message}`, 'error');
     }
@@ -273,6 +325,7 @@ export function renderCamera(root) {
       name: getDeviceName(),
       deviceId: cameraId,
       sessionId: state.sessionId,
+      mode: 'full',
       status: 'online',
       monitoring: true,
       settings,
@@ -363,10 +416,12 @@ export function renderCamera(root) {
       await restartCryDetector();
 
       await S.setDoc(docRef(), baseDoc(), { merge: true });
-      state.heartbeat = setInterval(() => {
-        S.setDoc(docRef(), { status: 'online', monitoring: true, lastSeen: S.serverTimestamp() }, { merge: true }).catch(() => {});
-      }, HEARTBEAT_MS);
+      state.lastHeartbeat = Date.now();
+      state.heartbeat = setInterval(heartbeat, HEARTBEAT_MS);
       listenRemoteSettings();
+      state.audioOnly = false;
+      watchVideoTrack();
+      updateMode();
 
       state.streamer = new CameraStreamer({
         stream: state.stream,
@@ -378,7 +433,7 @@ export function renderCamera(root) {
         },
       });
       await state.streamer.start();
-      state.wakeLock.request();
+      if (prefs.getCameraKeepScreenOn()) state.wakeLock.request();
 
       el.status.textContent = 'In ascolto';
       el.status.className = 'badge on';
@@ -463,6 +518,15 @@ export function renderCamera(root) {
   };
   window.addEventListener('beforeunload', onBeforeUnload);
   window.addEventListener('pagehide', onPageHide);
+  document.addEventListener('visibilitychange', updateMode);
+
+  el.keepOn.checked = prefs.getCameraKeepScreenOn();
+  el.keepOn.addEventListener('change', () => {
+    prefs.setCameraKeepScreenOn(el.keepOn.checked);
+    if (!state.running) return;
+    if (el.keepOn.checked) state.wakeLock.request();
+    else state.wakeLock.release();
+  });
 
   setLevel(el.motion.bar, el.motion.label, 0, MOTION_LABELS);
   setLevel(el.cry.bar, el.cry.label, 0, CRY_LABELS);
@@ -470,6 +534,7 @@ export function renderCamera(root) {
   return () => {
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('pagehide', onPageHide);
+    document.removeEventListener('visibilitychange', updateMode);
     state.wakeLock.destroy();
     stop({ unmount: true });
   };
