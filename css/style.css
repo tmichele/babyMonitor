@@ -152,6 +152,10 @@ body.fs-open { overflow: hidden; }
 .badge.off { color: var(--muted); }
 .badge.wait { color: var(--warn); }
 .badge.role { color: var(--accent); }
+.badge.battery { font-variant-numeric: tabular-nums; }
+.badge.battery.low { color: var(--danger); border-color: var(--danger); }
+.preview .badge.bottom { top: auto; bottom: 10px; }
+.detail-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .preview .badge.on::before, .preview .badge.off::before, .preview .badge.wait::before {
   content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor;
 }

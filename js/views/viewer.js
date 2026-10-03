@@ -7,6 +7,7 @@ import { getDeviceId, prefs } from '../config.js';
 import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, levelCardHtml } from '../ui.js';
 import { beep, vibrate, notify, requestNotifications, notificationsSupported, unlockAudio, WakeLockKeeper } from '../alerts.js';
 import { attachZoom, attachFullscreen } from '../zoom.js';
+import { normalizeBattery, batteryLabel, isLowBattery, LOW_BATTERY } from '../battery.js';
 
 const OFFLINE_AFTER_MS = 90000;
 
@@ -18,6 +19,7 @@ const DEFAULT_PREFS = {
   offlineAlert: true,
   keepAwake: false,
   autoVideo: true,
+  batteryAlert: true,
 };
 
 export function renderViewer(root) {
@@ -35,7 +37,10 @@ export function renderViewer(root) {
       <div class="card">
         <div class="detail-head">
           <h2 id="d-name">—</h2>
-          <span id="d-status" class="badge off">offline</span>
+          <span class="detail-badges">
+            <span id="d-battery" class="badge battery" title="Batteria della camera" hidden></span>
+            <span id="d-status" class="badge off">offline</span>
+          </span>
         </div>
         <p class="muted small" id="d-seen"></p>
       </div>
@@ -77,6 +82,7 @@ export function renderViewer(root) {
         <label class="check"><input type="checkbox" id="p-vibration"> Vibrazione</label>
         <label class="check"><input type="checkbox" id="p-offline"> Avvisa se la camera va offline</label>
         <label class="check"><input type="checkbox" id="p-autovideo"> Avvia il video automaticamente quando scatta un avviso</label>
+        <label class="check"><input type="checkbox" id="p-battery"> Avvisa se la batteria della camera è sotto il ${LOW_BATTERY} %</label>
         <label class="check"><input type="checkbox" id="p-awake"> Tieni lo schermo acceso</label>
         <div class="actions">
           <button id="p-notify" class="btn">🔔 Abilita notifiche</button>
@@ -114,6 +120,7 @@ export function renderViewer(root) {
     banner: $('#alert-banner', root),
     name: $('#d-name', root),
     status: $('#d-status', root),
+    battery: $('#d-battery', root),
     seen: $('#d-seen', root),
     video: $('#v-video', root),
     conn: $('#v-conn', root),
@@ -132,6 +139,7 @@ export function renderViewer(root) {
     pVibration: $('#p-vibration', root),
     pOffline: $('#p-offline', root),
     pAutoVideo: $('#p-autovideo', root),
+    pBattery: $('#p-battery', root),
     pAwake: $('#p-awake', root),
     pNotify: $('#p-notify', root),
     pTest: $('#p-test', root),
@@ -156,6 +164,7 @@ export function renderViewer(root) {
     stream: null,
     lastAlert: { motion: 0, cry: 0 },
     wasOnline: null,
+    lowBatteryAlerted: false,
     staleTimer: null,
     bannerTimer: null,
     remoteSettings: null,
@@ -171,6 +180,7 @@ export function renderViewer(root) {
     el.pVibration.checked = !!viewerPrefs.vibration;
     el.pOffline.checked = !!viewerPrefs.offlineAlert;
     el.pAutoVideo.checked = !!viewerPrefs.autoVideo;
+    el.pBattery.checked = !!viewerPrefs.batteryAlert;
     el.pAwake.checked = !!viewerPrefs.keepAwake;
     el.pNotify.hidden = !notificationsSupported();
     if (notificationsSupported() && Notification.permission === 'granted') el.pNotify.textContent = '🔔 Notifiche attive';
@@ -184,11 +194,12 @@ export function renderViewer(root) {
     viewerPrefs.vibration = el.pVibration.checked;
     viewerPrefs.offlineAlert = el.pOffline.checked;
     viewerPrefs.autoVideo = el.pAutoVideo.checked;
+    viewerPrefs.batteryAlert = el.pBattery.checked;
     viewerPrefs.keepAwake = el.pAwake.checked;
     prefs.setViewerPrefs(viewerPrefs);
     applyPrefsToUi();
   }
-  [el.pMotion, el.pCry, el.pSound, el.pVibration, el.pOffline, el.pAutoVideo, el.pAwake].forEach((i) => i.addEventListener('change', savePrefs));
+  [el.pMotion, el.pCry, el.pSound, el.pVibration, el.pOffline, el.pAutoVideo, el.pBattery, el.pAwake].forEach((i) => i.addEventListener('change', savePrefs));
   el.pNotify.addEventListener('click', async () => {
     const res = await requestNotifications();
     if (res === 'granted') toast('Notifiche abilitate', 'ok');
@@ -202,7 +213,9 @@ export function renderViewer(root) {
   function fireAlert(type, level, message, force = false) {
     if (!force && level <= state.lastAlert[type]) return;
     state.lastAlert[type] = level;
-    const title = type === 'cry' ? `Pianto: ${CRY_LABELS[level]}` : type === 'motion' ? `Movimento: ${MOTION_LABELS[level]}` : 'Baby Monitor';
+    const title = type === 'cry' ? `Pianto: ${CRY_LABELS[level]}`
+      : type === 'motion' ? `Movimento: ${MOTION_LABELS[level]}`
+        : type === 'battery' ? 'Batteria camera scarica' : 'Baby Monitor';
     showBanner(`${title} · ${message}`, level >= 3 ? 'danger' : 'warn');
     if (viewerPrefs.sound) {
       if (type === 'cry') beep({ count: 3, freq: 988, duration: 0.18, gap: 0.09 });
@@ -245,7 +258,7 @@ export function renderViewer(root) {
       return `<button class="cam-item ${id === state.selectedId ? 'selected' : ''}" data-id="${escapeHtml(id)}">
         <span class="cam-dot ${online ? 'on' : 'off'}" aria-hidden="true"></span>
         <span class="cam-name">${escapeHtml(d.name || 'Camera')}</span>
-        <span class="cam-meta muted">${online ? 'online' : `offline · ${formatAgo(tsToMillis(d.lastSeen), now)}`}</span>
+        <span class="cam-meta muted">${batteryLabel(normalizeBattery(d.battery))} · ${online ? 'online' : `offline · ${formatAgo(tsToMillis(d.lastSeen), now)}`}</span>
         <span class="chips">
           <span class="chip" data-level="${online && d.mode !== 'audio-only' ? d.motion?.level || 0 : 0}">🏃 ${online && d.mode === 'audio-only' ? 'solo audio' : MOTION_LABELS[online ? d.motion?.level || 0 : 0]}</span>
           <span class="chip" data-level="${online ? d.cry?.level || 0 : 0}">🔊 ${CRY_LABELS[online ? d.cry?.level || 0 : 0]}</span>
@@ -305,6 +318,20 @@ export function renderViewer(root) {
     el.status.textContent = online ? 'online' : 'offline';
     el.status.className = `badge ${online ? 'on' : 'off'}`;
     el.seen.textContent = `Ultimo segnale: ${formatAgo(tsToMillis(d.lastSeen), now)}`;
+    const battery = normalizeBattery(d.battery);
+    el.battery.hidden = !battery;
+    if (battery) {
+      el.battery.textContent = batteryLabel(battery);
+      el.battery.classList.toggle('low', isLowBattery(battery, 20));
+    }
+    if (online && battery && viewerPrefs.batteryAlert) {
+      if (isLowBattery(battery) && !state.lowBatteryAlerted) {
+        state.lowBatteryAlerted = true;
+        fireAlert('battery', 2, `${d.name || 'Camera'} al ${battery.level}%: mettila in carica`, true);
+      } else if (!isLowBattery(battery, LOW_BATTERY + 5)) {
+        state.lowBatteryAlerted = false;
+      }
+    }
 
     const audioOnly = online && d.mode === 'audio-only';
     const motion = online && !audioOnly ? d.motion || { score: 0, level: 0 } : { score: 0, level: 0 };

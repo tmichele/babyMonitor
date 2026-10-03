@@ -11,6 +11,7 @@ import { CameraStreamer } from '../rtc.js';
 import { getDeviceId, getDeviceName, setDeviceName, prefs } from '../config.js';
 import { $, toast, throttle, escapeHtml, formatTime, setLevel, setMeter, levelCardHtml } from '../ui.js';
 import { WakeLockKeeper } from '../alerts.js';
+import { watchBattery, batteryLabel, isLowBattery } from '../battery.js';
 
 const HEARTBEAT_MS = 20000;
 const STATE_PUBLISH_MS = 1500;
@@ -35,6 +36,7 @@ export function renderCamera(root) {
         <canvas id="cam-overlay" class="overlay"></canvas>
         <div id="cam-status" class="badge off">Non attiva</div>
         <div id="cam-viewers" class="badge viewers" hidden></div>
+        <div id="cam-battery" class="badge battery bottom" hidden></div>
       </div>
       <div class="actions">
         <button id="cam-start" class="btn primary big">▶ Avvia monitoraggio</button>
@@ -89,6 +91,7 @@ export function renderCamera(root) {
     status: $('#cam-status', root),
     keepOn: $('#cam-keep-on', root),
     viewers: $('#cam-viewers', root),
+    battery: $('#cam-battery', root),
     start: $('#cam-start', root),
     stop: $('#cam-stop', root),
     dark: $('#cam-dark', root),
@@ -111,6 +114,8 @@ export function renderCamera(root) {
     sessionId: null,
     audioOnly: false,
     lastHeartbeat: 0,
+    battery: null,
+    unwatchBattery: null,
     stream: null,
     motionDet: null,
     cryDet: null,
@@ -305,8 +310,22 @@ export function renderCamera(root) {
   function heartbeat() {
     if (!state.running) return;
     state.lastHeartbeat = Date.now();
-    S.setDoc(docRef(), { status: 'online', monitoring: true, lastSeen: S.serverTimestamp() }, { merge: true }).catch(() => {});
+    S.setDoc(docRef(), { status: 'online', monitoring: true, battery: state.battery, lastSeen: S.serverTimestamp() }, { merge: true }).catch(() => {});
   }
+
+  // ----- batteria -----
+  function onBattery(b) {
+    state.battery = b;
+    el.battery.hidden = !b;
+    if (b) {
+      el.battery.textContent = batteryLabel(b);
+      el.battery.classList.toggle('low', isLowBattery(b, 20));
+    }
+    if (state.running) S.setDoc(docRef(), { battery: b }, { merge: true }).catch(() => {});
+  }
+  watchBattery(onBattery).then((unwatch) => {
+    state.unwatchBattery = unwatch;
+  });
 
   async function restartCryDetector() {
     await state.cryDet?.stop();
@@ -326,6 +345,7 @@ export function renderCamera(root) {
       deviceId: cameraId,
       sessionId: state.sessionId,
       mode: 'full',
+      battery: state.battery,
       status: 'online',
       monitoring: true,
       settings,
@@ -535,6 +555,7 @@ export function renderCamera(root) {
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('pagehide', onPageHide);
     document.removeEventListener('visibilitychange', updateMode);
+    state.unwatchBattery?.();
     state.wakeLock.destroy();
     stop({ unmount: true });
   };
