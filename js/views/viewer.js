@@ -27,11 +27,6 @@ export function renderViewer(root) {
 
   root.innerHTML = `
   <section class="view viewer-view">
-    <div class="card">
-      <h3 class="section-title">📷 Camere</h3>
-      <div id="cam-list" class="cam-list"><p class="muted">Caricamento…</p></div>
-    </div>
-
     <div id="cam-detail" hidden>
       <div class="card">
         <div class="detail-head">
@@ -67,6 +62,11 @@ export function renderViewer(root) {
         <p class="muted small" id="v-msg" hidden></p>
         <p class="muted small">Pizzica o fai doppio tocco per ingrandire, trascina per spostare. Eventi e impostazioni dalle icone 🕒 e ⚙️ in alto.</p>
       </div>
+    </div>
+
+    <div class="card">
+      <h3 class="section-title">📷 Camere</h3>
+      <div id="cam-list" class="cam-list"><p class="muted">Caricamento…</p></div>
     </div>
   </section>
 
@@ -267,7 +267,7 @@ export function renderViewer(root) {
         </span>
       </button>`;
     }).join('');
-    $$('.cam-item', el.list).forEach((b) => b.addEventListener('click', () => selectCamera(b.dataset.id)));
+    $$('.cam-item', el.list).forEach((b) => b.addEventListener('click', () => selectCamera(b.dataset.id, { scroll: true })));
   }
 
   state.unsubList = S.onSnapshot(camerasCol(), (snap) => {
@@ -282,8 +282,9 @@ export function renderViewer(root) {
   }, (err) => toast(`Errore Firestore: ${err.message}`, 'error', 6000));
 
   // ----- dettaglio -----
-  function selectCamera(id) {
+  function selectCamera(id, { scroll = false } = {}) {
     if (state.selectedId !== id) stopStream();
+    if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     state.selectedId = id;
     prefs.setSelectedCamera(id);
     state.lastAlert = { motion: 0, cry: 0 };
