@@ -21,7 +21,9 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
 | Eventi | Registrati su Firestore quando un livello sale (soglia minima e cooldown configurabili); elenco degli ultimi 50 sul visualizzatore. |
 | Video live | WebRTC (audio + video) con segnalazione via Firestore; STUN di Google di default, TURN opzionale. |
 | Avvisi | Banner, beep, vibrazione e notifiche di sistema quando movimento/pianto superano il livello scelto; avviso se la camera va offline. |
-| Comodità | Schermo tenuto acceso (Wake Lock), modalità "schermo scuro" per la notte, scelta della videocamera, PWA installabile. |
+| Solo audio in background | Su Android, a schermo spento o con l'app in secondo piano, l'analisi del pianto gira in un AudioWorklet e continua insieme all'audio in diretta; il visualizzatore mostra "solo audio" e il movimento riprende quando lo schermo si riaccende. |
+| Avvio automatico del video | Il visualizzatore può aprire da solo il video in diretta quando scatta un avviso di pianto o movimento. |
+| Comodità | Schermo tenuto acceso (Wake Lock, disattivabile), modalità "schermo scuro" per la notte, zoom e schermo intero sul video, scelta della videocamera, PWA installabile. |
 
 ## Requisiti
 
@@ -90,7 +92,7 @@ In alternativa a GitHub Pages: `npm run deploy` pubblica su Firebase Hosting (ri
 `pixelDelta` (28/255, per ignorare il rumore del sensore) contano come "in movimento"; la
 percentuale viene smussata (EMA) e confrontata con le soglie `[1.5, 5, 12] × (5 / sensibilità)`.
 
-**Pianto** (`js/detection/cry.js`): un `AnalyserNode` (FFT 2048) fornisce ogni 100 ms spettro e
+**Pianto** (`js/detection/cry.js`, `cry-worklet.js`): un AudioWorklet (FFT 2048, `fft.js`) calcola sul thread audio, circa ogni 100 ms, spettro e
 forma d'onda. Si calcolano il volume in dB, la quota di energia nella banda 300–3000 Hz (dove si
 concentra il pianto infantile) e la "picchiosità" dello spettro in banda (un pianto è armonico, un
 rumore di fondo è piatto). Il punteggio è `100 × volume × (0,35 + 0,65 × somiglianza)`, smussato e
@@ -151,8 +153,11 @@ visualizzatore, sensibilità remota, video WebRTC tra due schede, eventi e stop.
 - **Rete**: senza server TURN il video può non connettersi se i due dispositivi sono dietro NAT
   restrittivi (reti mobili diverse). Aggiungi un TURN nella schermata di configurazione o in
   `firebase-config.js` (`window.ICE_SERVERS`).
-- **Background**: i browser sospendono camera e microfono quando la scheda va in secondo piano;
-  tieni l'app in primo piano sul dispositivo camera (lo schermo resta acceso da solo).
+- **Background**: su Android, con lo schermo spento o l'app in secondo piano, la videocamera viene
+  sospesa dal sistema ma il microfono continua: la camera passa in modalità **solo audio** (pianto e
+  audio in diretta attivi, movimento non disponibile). Alcuni produttori (Xiaomi, Huawei, ...)
+  chiudono comunque le app in background: escludi Chrome dal risparmio energetico. Su iPhone il
+  monitoraggio si ferma a schermo spento: lascia lo schermo acceso (modalità "schermo scuro").
 - **Rilevazione euristica**: non è un classificatore addestrato; regola la sensibilità in base
   alla stanza (luce, rumore di fondo). Il rilevatore reagisce anche a voci e rumori forti, che
   vengono comunque segnalati come `Rumore`/`Lamento`.
