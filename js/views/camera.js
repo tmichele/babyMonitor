@@ -9,7 +9,7 @@ import {
 } from '../detection/levels.js';
 import { CameraStreamer } from '../rtc.js';
 import { getDeviceId, getDeviceName, setDeviceName, prefs } from '../config.js';
-import { $, toast, throttle, escapeHtml, formatTime, setLevel, setMeter, levelCardHtml } from '../ui.js';
+import { $, toast, throttle, escapeHtml, formatTime, setLevel, setMeter, levelCardHtml, bindDetails } from '../ui.js';
 import { WakeLockKeeper } from '../alerts.js';
 import { watchBattery, batteryLabel, isLowBattery } from '../battery.js';
 
@@ -27,9 +27,9 @@ export function renderCamera(root) {
   root.innerHTML = `
   <section class="view camera-view">
     <div class="card">
-      <div class="row">
-        <label class="grow">Nome camera <input id="cam-name" maxlength="40" value="${escapeHtml(getDeviceName())}"></label>
-        <label class="grow">Videocamera <select id="cam-source"><option value="">Predefinita (posteriore)</option></select></label>
+      <div class="card-head">
+        <h3 class="section-title">📷 Monitoraggio</h3>
+        <span class="muted small" id="cam-name-label">${escapeHtml(getDeviceName())}</span>
       </div>
       <div class="preview">
         <video id="cam-video" autoplay muted playsinline></video>
@@ -43,37 +43,49 @@ export function renderCamera(root) {
         <button id="cam-stop" class="btn danger big" hidden>■ Ferma</button>
         <button id="cam-dark" class="btn" hidden>🌙 Schermo scuro</button>
       </div>
-      <label class="check"><input type="checkbox" id="cam-keep-on"> Tieni lo schermo acceso (usa "Schermo scuro" di notte)</label>
-      <p class="muted small">Su Android, con lo schermo spento o l'app in secondo piano, la rilevazione del <b>pianto</b> e l'audio in diretta continuano
-      (modalità <b>solo audio</b>); il <b>movimento</b> riprende quando riaccendi lo schermo. Su iPhone il monitoraggio si ferma a schermo spento:
-      lascia lo schermo acceso.</p>
-    </div>
-
-    <div class="grid-2">
-      ${levelCardHtml('motion', 'Movimento', '🏃')}
-      ${levelCardHtml('cry', 'Pianto', '🔊')}
+      <div class="grid-2 levels">
+        ${levelCardHtml('motion', 'Movimento', '🏃')}
+        ${levelCardHtml('cry', 'Pianto', '🔊')}
+      </div>
     </div>
 
     <div class="card">
-      <h3>Sensibilità</h3>
-      <label class="range">Movimento <span id="set-motion-v"></span>
-        <input type="range" id="set-motion" min="1" max="10" step="1"></label>
-      <label class="range">Pianto <span id="set-cry-v"></span>
-        <input type="range" id="set-cry" min="1" max="10" step="1"></label>
-      <label>Registra eventi da livello
-        <select id="set-minlevel">
-          <option value="1">1 · Leggero / Rumore</option>
-          <option value="2">2 · Moderato / Lamento</option>
-          <option value="3">3 · Intenso / Pianto</option>
-        </select>
-      </label>
-      <p class="muted small">Le impostazioni si possono cambiare anche dal visualizzatore.</p>
-      <p class="muted small" id="cam-thresholds"></p>
-    </div>
-
-    <div class="card">
-      <h3>Eventi recenti</h3>
+      <h3 class="section-title">🕒 Eventi recenti</h3>
       <ul id="cam-events" class="events"><li class="muted">Nessun evento.</li></ul>
+    </div>
+
+    <div class="card settings-card">
+      <h3 class="section-title">⚙️ Impostazioni</h3>
+      <details class="group" id="grp-device">
+        <summary>📱 Dispositivo <span class="summary-hint" id="hint-device"></span></summary>
+        <div class="group-body">
+          <div class="row">
+            <label class="grow">Nome camera <input id="cam-name" maxlength="40" value="${escapeHtml(getDeviceName())}"></label>
+            <label class="grow">Videocamera <select id="cam-source"><option value="">Predefinita (posteriore)</option></select></label>
+          </div>
+          <label class="check"><input type="checkbox" id="cam-keep-on"> Tieni lo schermo acceso (usa "Schermo scuro" di notte)</label>
+          <p class="muted small">Su Android, a schermo spento o con l'app in secondo piano, continuano la rilevazione del <b>pianto</b> e l'audio in diretta
+          (modalità <b>solo audio</b>); il <b>movimento</b> riprende quando riaccendi lo schermo. Su iPhone il monitoraggio si ferma a schermo spento.</p>
+        </div>
+      </details>
+      <details class="group" id="grp-sens">
+        <summary>🎚️ Sensibilità <span class="summary-hint" id="hint-sens"></span></summary>
+        <div class="group-body">
+          <label class="range">Movimento <span id="set-motion-v"></span>
+            <input type="range" id="set-motion" min="1" max="10" step="1"></label>
+          <label class="range">Pianto <span id="set-cry-v"></span>
+            <input type="range" id="set-cry" min="1" max="10" step="1"></label>
+          <label>Registra eventi da livello
+            <select id="set-minlevel">
+              <option value="1">1 · Leggero / Rumore</option>
+              <option value="2">2 · Moderato / Lamento</option>
+              <option value="3">3 · Intenso / Pianto</option>
+            </select>
+          </label>
+          <p class="muted small">Modificabili anche dal visualizzatore.</p>
+          <p class="muted small" id="cam-thresholds"></p>
+        </div>
+      </details>
     </div>
   </section>
   <div id="dark-screen" class="dark-screen" hidden>
@@ -85,6 +97,9 @@ export function renderCamera(root) {
 
   const el = {
     name: $('#cam-name', root),
+    nameLabel: $('#cam-name-label', root),
+    hintDevice: $('#hint-device', root),
+    hintSens: $('#hint-sens', root),
     source: $('#cam-source', root),
     video: $('#cam-video', root),
     overlay: $('#cam-overlay', root),
@@ -145,6 +160,7 @@ export function renderCamera(root) {
     const mt = scaledThresholds(settings.motionThresholds, settings.motionSensitivity).map((t) => t.toFixed(1));
     const ct = scaledThresholds(settings.cryThresholds, settings.crySensitivity).map((t) => t.toFixed(0));
     el.thresholds.textContent = `Soglie movimento (% pixel): ${mt.join(' / ')} · soglie pianto (punteggio): ${ct.join(' / ')}`;
+    el.hintSens.textContent = `movimento ${settings.motionSensitivity} · pianto ${settings.crySensitivity} · eventi da liv. ${settings.eventMinLevel}`;
   }
 
   const persistSettings = throttle(async () => {
@@ -175,6 +191,8 @@ export function renderCamera(root) {
   el.name.addEventListener('change', () => {
     setDeviceName(el.name.value);
     el.name.value = getDeviceName();
+    el.nameLabel.textContent = getDeviceName();
+    el.hintDevice.textContent = getDeviceName();
     if (state.running) S.setDoc(docRef(), { name: getDeviceName() }, { merge: true }).catch(() => {});
   });
 
@@ -540,6 +558,9 @@ export function renderCamera(root) {
   window.addEventListener('pagehide', onPageHide);
   document.addEventListener('visibilitychange', updateMode);
 
+  bindDetails($('#grp-device', root), 'camera.device', false);
+  bindDetails($('#grp-sens', root), 'camera.sens', false);
+  el.hintDevice.textContent = getDeviceName();
   el.keepOn.checked = prefs.getCameraKeepScreenOn();
   el.keepOn.addEventListener('change', () => {
     prefs.setCameraKeepScreenOn(el.keepOn.checked);

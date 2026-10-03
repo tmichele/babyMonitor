@@ -95,11 +95,30 @@ export function setMeter(el, pct) {
 }
 
 export function levelCardHtml(prefix, title, icon) {
-  return `<div class="card level-card" id="${prefix}-card" data-level="0">
+  return `<div class="panel level-card" id="${prefix}-card" data-level="0">
     <div class="level-head"><span class="level-icon" aria-hidden="true">${icon}</span><h3>${title}</h3></div>
     <div class="level-label" id="${prefix}-label" data-level="0">—</div>
     ${levelBarHtml(`${prefix}-bar`)}
     <div class="meter"><div class="meter-fill" id="${prefix}-meter"></div></div>
     <small class="muted" id="${prefix}-score">—</small>
   </div>`;
+}
+
+/** Ricorda lo stato aperto/chiuso di un <details> nel browser. */
+export function bindDetails(el, key, defaultOpen = false) {
+  if (!el) return;
+  const storageKey = `babymonitor.details.${key}`;
+  try {
+    const saved = localStorage.getItem(storageKey);
+    el.open = saved == null ? defaultOpen : saved === '1';
+  } catch {
+    el.open = defaultOpen;
+  }
+  el.addEventListener('toggle', () => {
+    try {
+      localStorage.setItem(storageKey, el.open ? '1' : '0');
+    } catch {
+      /* ignora */
+    }
+  });
 }

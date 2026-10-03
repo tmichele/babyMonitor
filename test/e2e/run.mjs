@@ -56,6 +56,8 @@ async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 }
 
+const openGroups = (page) => page.$$eval('details.group', (ds) => ds.forEach((d) => { d.open = true; }));
+
 const failures = [];
 function check(cond, msg) {
   if (cond) console.log(`  ✓ ${msg}`);
@@ -144,6 +146,7 @@ try {
   console.log('2. Camera');
   await cam.click('a[href="#/camera"]');
   await cam.waitForSelector('#cam-start');
+  await openGroups(cam);
   await cam.fill('#cam-name', 'Cameretta');
   await cam.dispatchEvent('#cam-name', 'change');
   await cam.click('#cam-start');
@@ -179,6 +182,7 @@ try {
   attach(view, 'viewer');
   await view.goto(base + '#/viewer');
   await view.waitForSelector('.cam-item');
+  await openGroups(view);
   check(await view.$eval('.cam-name', (e) => e.textContent) === 'Cameretta', 'camera elencata');
   await waitFor(() => view.$eval('#d-status', (e) => e.textContent === 'online'), { label: 'camera online nel dettaglio' });
   check(true, 'dettaglio camera online (selezione automatica)');
