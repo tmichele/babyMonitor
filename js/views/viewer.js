@@ -6,6 +6,7 @@ import { ViewerStream } from '../rtc.js';
 import { getDeviceId, prefs } from '../config.js';
 import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, levelCardHtml } from '../ui.js';
 import { beep, vibrate, notify, requestNotifications, notificationsSupported, unlockAudio, WakeLockKeeper } from '../alerts.js';
+import { attachZoom, attachFullscreen } from '../zoom.js';
 
 const OFFLINE_AFTER_MS = 60000;
 
@@ -44,10 +45,17 @@ export function renderViewer(root) {
 
       <div class="card">
         <h3>Video in diretta</h3>
-        <div class="preview">
+        <div class="preview" id="v-preview">
           <video id="v-video" autoplay playsinline></video>
           <div id="v-conn" class="badge off">Non connesso</div>
+          <div class="zoom-controls">
+            <button class="zoom-btn" id="z-out" title="Riduci" aria-label="Riduci zoom">−</button>
+            <button class="zoom-btn zoom-level" id="z-level" title="Ripristina zoom" aria-label="Ripristina zoom">1×</button>
+            <button class="zoom-btn" id="z-in" title="Ingrandisci" aria-label="Ingrandisci">+</button>
+            <button class="zoom-btn" id="z-fs" title="Schermo intero" aria-label="Schermo intero">⛶</button>
+          </div>
         </div>
+        <p class="muted small">Pizzica o fai doppio tocco per ingrandire, trascina per spostare.</p>
         <div class="actions">
           <button id="v-start" class="btn primary big">▶ Avvia video</button>
           <button id="v-stop" class="btn danger big" hidden>■ Ferma video</button>
@@ -111,6 +119,11 @@ export function renderViewer(root) {
     vStop: $('#v-stop', root),
     vMute: $('#v-mute', root),
     vMsg: $('#v-msg', root),
+    preview: $('#v-preview', root),
+    zOut: $('#z-out', root),
+    zIn: $('#z-in', root),
+    zLevel: $('#z-level', root),
+    zFs: $('#z-fs', root),
     pMotion: $('#p-motion', root),
     pCry: $('#p-cry', root),
     pSound: $('#p-sound', root),
@@ -436,6 +449,25 @@ export function renderViewer(root) {
   }
   el.vStart.addEventListener('click', startStream);
   el.vStop.addEventListener('click', stopStream);
+  // ----- zoom e schermo intero -----
+  const zoom = attachZoom(el.preview, el.video, {
+    onChange: (scale) => {
+      el.zLevel.textContent = `${scale.toFixed(1).replace(/\.0$/, '')}×`;
+      el.zOut.disabled = scale <= 1;
+    },
+  });
+  const fullscreen = attachFullscreen(el.preview, {
+    onChange: (active) => {
+      el.zFs.textContent = active ? '✕' : '⛶';
+      el.zFs.title = active ? 'Esci da schermo intero' : 'Schermo intero';
+    },
+  });
+  el.zIn.addEventListener('click', () => zoom.zoomIn());
+  el.zOut.addEventListener('click', () => zoom.zoomOut());
+  el.zLevel.addEventListener('click', () => zoom.reset());
+  el.zFs.addEventListener('click', () => fullscreen.toggle());
+  el.zOut.disabled = true;
+
   el.vMute.addEventListener('click', () => {
     el.video.muted = !el.video.muted;
     el.vMute.textContent = el.video.muted ? '🔇 Audio disattivato' : '🔈 Audio attivo';
@@ -446,6 +478,8 @@ export function renderViewer(root) {
   }
 
   return () => {
+    zoom.destroy();
+    fullscreen.destroy();
     stopStream();
     state.unsubList?.();
     state.unsubDoc?.();
