@@ -5,7 +5,9 @@ import { MOTION_LABELS, CRY_LABELS, normalizeSettings, scaledThresholds } from '
 import { ViewerStream } from '../rtc.js';
 import { getDeviceId, prefs } from '../config.js';
 import { $, $$, toast, escapeHtml, formatTime, formatAgo, setLevel, setMeter, levelCardHtml, subpageHtml, showSubpage } from '../ui.js';
-import { beep, vibrate, notify, requestNotifications, notificationsSupported, unlockAudio, WakeLockKeeper } from '../alerts.js';
+import {
+  beep, vibrate, notify, requestNotifications, notificationState, isIOS, isStandalone, unlockAudio, WakeLockKeeper,
+} from '../alerts.js';
 import { attachZoom, attachFullscreen } from '../zoom.js';
 import { normalizeBattery, batteryLabel, isLowBattery, LOW_BATTERY } from '../battery.js';
 
@@ -95,6 +97,7 @@ export function renderViewer(root) {
         <button id="p-notify" class="btn">🔔 Abilita notifiche</button>
         <button id="p-test" class="btn">Prova avviso</button>
       </div>
+      <p class="muted small" id="p-notify-hint"></p>
     </div>
     <div class="card">
       <h3 class="section-title">🎚️ Sensibilità della camera <span class="muted small" id="r-cam-name"></span></h3>
@@ -142,6 +145,7 @@ export function renderViewer(root) {
     pAwake: $('#p-awake', root),
     pNotify: $('#p-notify', root),
     pTest: $('#p-test', root),
+    pNotifyHint: $('#p-notify-hint', root),
     rMotion: $('#r-motion', root),
     rMotionV: $('#r-motion-v', root),
     rCry: $('#r-cry', root),
@@ -183,11 +187,31 @@ export function renderViewer(root) {
     el.pAutoVideo.checked = !!viewerPrefs.autoVideo;
     el.pBattery.checked = !!viewerPrefs.batteryAlert;
     el.pAwake.checked = !!viewerPrefs.keepAwake;
-    el.pNotify.hidden = !notificationsSupported();
-    if (notificationsSupported() && Notification.permission === 'granted') el.pNotify.textContent = '🔔 Notifiche attive';
+    updateNotifyUi();
     if (viewerPrefs.keepAwake) state.wakeLock.request();
     else state.wakeLock.release();
   }
+  function updateNotifyUi() {
+    const st = notificationState();
+    el.pNotify.hidden = st === 'unsupported';
+    el.pNotify.disabled = st === 'granted' || st === 'denied';
+    el.pNotify.textContent = st === 'granted' ? '🔔 Notifiche attive'
+      : st === 'denied' ? '🔕 Notifiche bloccate' : '🔔 Abilita notifiche';
+    let hint = '';
+    if (st === 'unsupported') {
+      hint = isIOS() && !isStandalone()
+        ? 'Su iPhone/iPad le notifiche funzionano solo con l\'app aggiunta alla schermata Home (Condividi → Aggiungi alla schermata Home) e aperta da lì.'
+        : 'Questo browser non supporta le notifiche di sistema: restano suono, vibrazione e banner.';
+    } else if (st === 'denied') {
+      hint = 'Il browser ha bloccato le notifiche per questo sito: riabilitale dalle impostazioni del sito (icona del lucchetto accanto all\'indirizzo).';
+    } else if (st === 'default') {
+      hint = 'Abilita le notifiche per essere avvisato anche quando l\'app è in secondo piano.';
+    } else {
+      hint = 'Gli avvisi arrivano anche con l\'app in secondo piano finché la scheda resta aperta. Per la massima affidabilità lascia attivo il video o "Tieni lo schermo acceso".';
+    }
+    el.pNotifyHint.textContent = hint;
+  }
+
   function savePrefs() {
     viewerPrefs.alertMotionLevel = Number(el.pMotion.value);
     viewerPrefs.alertCryLevel = Number(el.pCry.value);
@@ -204,15 +228,28 @@ export function renderViewer(root) {
   el.pNotify.addEventListener('click', async () => {
     const res = await requestNotifications();
     if (res === 'granted') toast('Notifiche abilitate', 'ok');
+    else if (res === 'denied') toast('Notifiche bloccate dal browser', 'error', 6000);
     else toast('Notifiche non abilitate', 'error');
-    applyPrefsToUi();
+    updateNotifyUi();
   });
-  el.pTest.addEventListener('click', () => fireAlert('cry', 3, 'Prova avviso', true));
+  const TEST_RESULT = {
+    shown: ['Notifica di sistema inviata', 'ok'],
+    denied: ['Notifiche bloccate dal browser: nessuna notifica di sistema', 'error'],
+    default: ['Premi "Abilita notifiche" per ricevere anche la notifica di sistema', 'info'],
+    unsupported: ['Notifiche di sistema non supportate qui: solo suono, vibrazione e banner', 'info'],
+    failed: ['Il browser non ha mostrato la notifica di sistema', 'error'],
+  };
+  el.pTest.addEventListener('click', async () => {
+    const res = await fireAlert('cry', 3, 'Prova avviso', true);
+    const [msg, kind] = TEST_RESULT[res] || TEST_RESULT.failed;
+    toast(msg, kind, 6000);
+    updateNotifyUi();
+  });
   applyPrefsToUi();
 
   // ----- avvisi -----
   function fireAlert(type, level, message, force = false) {
-    if (!force && level <= state.lastAlert[type]) return;
+    if (!force && level <= state.lastAlert[type]) return Promise.resolve('skipped');
     state.lastAlert[type] = level;
     const title = type === 'cry' ? `Pianto: ${CRY_LABELS[level]}`
       : type === 'motion' ? `Movimento: ${MOTION_LABELS[level]}`
@@ -225,11 +262,12 @@ export function renderViewer(root) {
       else beep({ count: 4, freq: 440, duration: 0.25, gap: 0.12 });
     }
     if (viewerPrefs.vibration) vibrate(type === 'cry' ? [300, 100, 300, 100, 300] : [200, 100, 200]);
-    notify(title, message);
+    const shown = notify(title, message, { level });
     if (viewerPrefs.autoVideo && (type === 'cry' || type === 'motion') && !state.stream && !el.vStart.disabled) {
       showMsg('Avvio automatico del video per l\'avviso…');
       startStream();
     }
+    return shown;
   }
 
   function showBanner(text, kind) {
