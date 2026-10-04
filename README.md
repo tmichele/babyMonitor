@@ -159,6 +159,10 @@ visualizzatore, sensibilità remota, video WebRTC tra due schede, eventi e stop.
   audio in diretta attivi, movimento non disponibile). Alcuni produttori (Xiaomi, Huawei, ...)
   chiudono comunque le app in background: escludi Chrome dal risparmio energetico. Su iPhone il
   monitoraggio si ferma a schermo spento: lascia lo schermo acceso (modalità "schermo scuro").
+- **Notifiche di sistema**: richiedono il permesso del browser (pulsante "Abilita notifiche"); "Prova
+  avviso" dice se la notifica è stata mostrata. Arrivano anche con l'app in secondo piano finché la
+  scheda resta aperta; su iPhone solo con l'app aggiunta alla schermata Home. Senza un server di push
+  non possono arrivare a browser chiuso.
 - **Rilevazione euristica**: non è un classificatore addestrato; regola la sensibilità in base
   alla stanza (luce, rumore di fondo). Il rilevatore reagisce anche a voci e rumori forti, che
   vengono comunque segnalati come `Rumore`/`Lamento`.

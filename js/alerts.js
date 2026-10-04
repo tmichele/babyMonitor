@@ -54,6 +54,22 @@ export function notificationsSupported() {
   return 'Notification' in window;
 }
 
+/** 'unsupported' | 'granted' | 'denied' | 'default' */
+export function notificationState() {
+  if (!notificationsSupported()) return 'unsupported';
+  return Notification.permission;
+}
+
+export function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/** True se l'app è aperta come PWA installata (schermata Home). */
+export function isStandalone() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
 export async function requestNotifications() {
   if (!notificationsSupported()) return 'unsupported';
   await registerServiceWorker();
@@ -65,22 +81,46 @@ export async function requestNotifications() {
   }
 }
 
-export async function notify(title, body) {
-  if (!notificationsSupported() || Notification.permission !== 'granted') return;
-  const opts = { body, tag: 'babymonitor', renotify: true, icon: 'icons/icon.svg' };
-  try {
-    const reg = swRegistration || (await registerServiceWorker());
-    if (reg?.showNotification) {
-      await reg.showNotification(title, opts);
-      return;
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+}
+
+/**
+ * Mostra una notifica di sistema. Usa il service worker ATTIVO (navigator.serviceWorker.ready):
+ * la registrazione appena creata può non esserlo ancora e su Android `new Notification()` non
+ * esiste. Restituisce 'shown' | 'unsupported' | 'denied' | 'default' | 'failed'.
+ */
+export async function notify(title, body, { level = 2 } = {}) {
+  if (!notificationsSupported()) return 'unsupported';
+  if (Notification.permission !== 'granted') return Notification.permission;
+  const opts = {
+    body,
+    tag: 'babymonitor',
+    renotify: true,
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    vibrate: level >= 3 ? [300, 100, 300, 100, 300] : [200, 100, 200],
+    requireInteraction: level >= 3,
+    timestamp: Date.now(),
+  };
+  if ('serviceWorker' in navigator) {
+    try {
+      registerServiceWorker();
+      const reg = await withTimeout(navigator.serviceWorker.ready, 4000);
+      if (reg?.showNotification) {
+        await reg.showNotification(title, opts);
+        return 'shown';
+      }
+    } catch (err) {
+      console.warn('Notifica via service worker fallita', err);
     }
-  } catch {
-    /* fallback sotto */
   }
   try {
     new Notification(title, opts);
-  } catch {
-    /* alcune piattaforme non permettono Notification() dalla pagina */
+    return 'shown';
+  } catch (err) {
+    console.warn('Notification() non disponibile', err);
+    return 'failed';
   }
 }
 

@@ -207,6 +207,16 @@ try {
   await waitFor(() => cam.$eval('#set-motion', (e) => e.value === '8'), { label: 'sensibilità applicata sulla camera' });
   check(true, 'la camera applica la sensibilità inviata dal visualizzatore');
   check(await cam.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), 'la camera continua a monitorare mentre le impostazioni sono aperte');
+  await view.click('#p-test');
+  // In Chromium headless il permesso notifiche risulta sempre negato: l'esito atteso è "inviata"
+  // dove il permesso c'è, "bloccate" qui. In entrambi i casi il service worker deve essere attivo.
+  await waitFor(() => view.$$eval('.toast', (ts) => ts.some((t) => /Notifica di sistema inviata|Notifiche bloccate dal browser/.test(t.textContent))), { label: 'esito prova notifica' });
+  check(true, '"Prova avviso" riporta l\'esito della notifica di sistema');
+  const swActive = await view.evaluate(() => Promise.race([
+    navigator.serviceWorker.ready.then((r) => !!r.active),
+    new Promise((resolve) => setTimeout(() => resolve(false), 4000)),
+  ]));
+  check(swActive, 'service worker attivo per le notifiche di sistema');
   await goSub(view, 'viewer', 'events');
   await waitFor(() => view.$$eval('#v-events li[data-level]', (els) => els.length > 0), { label: 'eventi nella pagina eventi' });
   check(true, 'la pagina eventi del visualizzatore elenca gli eventi');
