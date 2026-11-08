@@ -29,6 +29,23 @@ export async function deleteCall(callRef) {
   }
 }
 
+/**
+ * Scene scure: privilegia il dettaglio e la risoluzione rispetto alla fluidità e concede un po'
+ * più di banda, così il codec non "spalma" le zone in ombra. Tutto opzionale: ignora gli errori.
+ */
+export async function tuneVideoSender(sender, { maxBitrate = 1200000 } = {}) {
+  try {
+    if (sender.track && 'contentHint' in sender.track) sender.track.contentHint = 'detail';
+    const params = sender.getParameters();
+    params.degradationPreference = 'maintain-resolution';
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = maxBitrate;
+    await sender.setParameters(params);
+  } catch (err) {
+    console.info('Parametri video non applicabili', err?.message || err);
+  }
+}
+
 /** Lato camera: risponde alle richieste di visione con il MediaStream locale. */
 export class CameraStreamer {
   constructor({ stream, callsRef, sessionId = '', onViewersChange = () => {} }) {
@@ -84,7 +101,10 @@ export class CameraStreamer {
     this.peers.set(callRef.id, peer);
     this.emitViewers();
 
-    this.stream.getTracks().forEach((track) => pc.addTrack(track, this.stream));
+    this.stream.getTracks().forEach((track) => {
+      const sender = pc.addTrack(track, this.stream);
+      if (track.kind === 'video') tuneVideoSender(sender);
+    });
     pc.onicecandidate = (e) => {
       if (e.candidate) S.addDoc(S.collection(callRef, 'cameraCandidates'), e.candidate.toJSON()).catch(() => {});
     };

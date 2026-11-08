@@ -15,12 +15,13 @@ Cloud Firestore): i dati sono visibili solo a chi accede con lo stesso account.
 
 | Area | Dettagli |
 | --- | --- |
-| Movimento | Confronto di frame a bassa risoluzione (64×48) sul canvas; punteggio = % di pixel cambiati; livelli `Fermo / Leggero / Moderato / Intenso`; overlay rosso sulle zone in movimento. |
+| Movimento | Confronto di frame a bassa risoluzione (64×48) sul canvas; punteggio = % di pixel cambiati; livelli `Fermo / Leggero / Moderato / Intenso`; overlay rosso sulle zone in movimento. Robusto alla scarsa luce: normalizza la luminosità media (l'autoesposizione non è movimento) e adatta la soglia per pixel al rumore del sensore. |
 | Pianto | Web Audio API: volume RMS in dB + quota di energia nella banda 300–3000 Hz + "picchi" armonici; punteggio 0–100; livelli `Silenzio / Rumore / Lamento / Pianto`. |
 | Livelli stabili | Media mobile esponenziale + tenuta del livello (2,5 s) per evitare sfarfallii; sensibilità 1–10 per movimento e pianto, regolabile anche **dal visualizzatore**. |
 | Eventi | Registrati su Firestore quando un livello sale (soglia minima e cooldown configurabili); elenco degli ultimi 50 sul visualizzatore. |
 | Video live | WebRTC (audio + video) con segnalazione via Firestore; STUN di Google di default, TURN opzionale. |
 | Avvisi | Banner, beep, vibrazione e notifiche di sistema quando movimento/pianto superano il livello scelto; avviso se la camera va offline. |
+| Scarsa luce | **Modalità notte** sulla camera (esposizione al massimo, 10 fps, con indicazione dei controlli accettati dal telefono); codec impostato per privilegiare dettaglio e risoluzione; cursore **Visione notturna** sul visualizzatore (gamma, luminosità, contrasto, bianco e nero) applicato al video ricevuto senza costi per la camera. |
 | Solo audio in background | Su Android, a schermo spento o con l'app in secondo piano, l'analisi del pianto gira in un AudioWorklet e continua insieme all'audio in diretta; il visualizzatore mostra "solo audio" e il movimento riprende quando lo schermo si riaccende. |
 | Batteria | Livello del dispositivo locale sempre nella barra in alto; la camera pubblica il proprio e il visualizzatore lo mostra in elenco e dettaglio, con avviso sotto il 15 % se non in carica (Battery Status API: Chrome/Android; su iPhone e Firefox "n/d"). |
 | Avvio automatico del video | Il visualizzatore può aprire da solo il video in diretta quando scatta un avviso di pianto o movimento. |
@@ -89,9 +90,12 @@ In alternativa a GitHub Pages: `npm run deploy` pubblica su Firebase Hosting (ri
 ## Come funziona la rilevazione
 
 **Movimento** (`js/detection/motion.js`): ogni 125 ms il frame video viene disegnato su un canvas
-64×48, convertito in luminanza e confrontato con il precedente. I pixel la cui differenza supera
-`pixelDelta` (28/255, per ignorare il rumore del sensore) contano come "in movimento"; la
-percentuale viene smussata (EMA) e confrontata con le soglie `[1.5, 5, 12] × (5 / sensibilità)`.
+64×48, convertito in luminanza e confrontato con il precedente. Prima del confronto la luminosità
+media del nuovo frame viene allineata a quella del precedente (un cambio globale di esposizione non
+è movimento); la mediana delle differenze stima il rumore del sensore e la soglia per pixel diventa
+`max(28, 4 × rumore)` (massimo 90), così al buio il rumore non produce falsi movimenti. I pixel sopra
+soglia contano come "in movimento"; la percentuale viene smussata (EMA) e confrontata con le soglie
+`[1.5, 5, 12] × (5 / sensibilità)`.
 
 **Pianto** (`js/detection/cry.js`, `cry-worklet.js`): un AudioWorklet (FFT 2048, `fft.js`) calcola sul thread audio, circa ogni 100 ms, spettro e
 forma d'onda. Si calcolano il volume in dB, la quota di energia nella banda 300–3000 Hz (dove si

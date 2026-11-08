@@ -32,9 +32,74 @@ export function compareFrames(prev, curr, pixelDelta = 28, mask = null) {
   return { score: fraction * 100, changedFraction: fraction, meanDelta: changed ? sumDelta / changed : 0 };
 }
 
+/** Luminanza media 0..255. */
+export function frameMean(gray) {
+  if (!gray.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < gray.length; i++) sum += gray[i];
+  return sum / gray.length;
+}
+
+export const ADAPTIVE_DEFAULTS = Object.freeze({
+  basePixelDelta: 28,
+  /** Soglia per pixel = max(base, noiseFactor × mediana delle differenze). */
+  noiseFactor: 4,
+  maxPixelDelta: 90,
+  normalize: true,
+  adaptive: true,
+});
+
+/**
+ * Confronto robusto alla scarsa luce:
+ * - normalizza la luminosità media (l'autoesposizione che schiarisce tutto il frame non è movimento);
+ * - stima il rumore del sensore con la mediana delle differenze (robusta finché il movimento
+ *   copre meno di metà dell'immagine) e alza la soglia per pixel di conseguenza.
+ * @returns {{score, changedFraction, meanDelta, noise, pixelDelta, offset, brightness}}
+ */
+export function analyzeMotion(prev, curr, options = {}, mask = null) {
+  const o = { ...ADAPTIVE_DEFAULTS, ...options };
+  const n = Math.min(prev.length, curr.length);
+  if (!n) return { score: 0, changedFraction: 0, meanDelta: 0, noise: 0, pixelDelta: o.basePixelDelta, offset: 0, brightness: 0 };
+  const brightness = frameMean(curr);
+  const offset = o.normalize ? Math.round(frameMean(prev) - brightness) : 0;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) {
+    const v = curr[i] + offset;
+    const d = Math.abs((v < 0 ? 0 : v > 255 ? 255 : v) - prev[i]);
+    hist[d]++;
+  }
+  let noise = 0;
+  if (o.adaptive) {
+    let acc = 0;
+    const half = n / 2;
+    for (let d = 0; d < 256; d++) {
+      acc += hist[d];
+      if (acc >= half) {
+        noise = d;
+        break;
+      }
+    }
+  }
+  const pixelDelta = Math.min(o.maxPixelDelta, Math.max(o.basePixelDelta, noise * o.noiseFactor));
+  let changed = 0;
+  let sumDelta = 0;
+  for (let i = 0; i < n; i++) {
+    const v = curr[i] + offset;
+    const d = Math.abs((v < 0 ? 0 : v > 255 ? 255 : v) - prev[i]);
+    const hit = d >= pixelDelta;
+    if (hit) {
+      changed++;
+      sumDelta += d;
+    }
+    if (mask) mask[i] = hit ? 1 : 0;
+  }
+  const fraction = changed / n;
+  return { score: fraction * 100, changedFraction: fraction, meanDelta: changed ? sumDelta / changed : 0, noise, pixelDelta, offset, brightness };
+}
+
 /**
  * Campiona un <video> a bassa risoluzione e calcola il punteggio di movimento.
- * onUpdate({ score, smoothed, meanDelta }) viene chiamato a ogni frame analizzato.
+ * onUpdate({ score, smoothed, meanDelta, noise, pixelDelta, brightness }) a ogni frame analizzato.
  */
 export class MotionDetector {
   constructor(video, {
@@ -101,10 +166,10 @@ export class MotionDetector {
     const img = this.ctx.getImageData(0, 0, this.width, this.height);
     this.curr = toGrayscale(img.data, this.width, this.height, this.curr);
     if (this.prev) {
-      const result = compareFrames(this.prev, this.curr, this.pixelDelta, this.mask);
+      const result = analyzeMotion(this.prev, this.curr, { basePixelDelta: this.pixelDelta }, this.mask);
       this.smoothed = ema(this.smoothed, result.score, this.alpha);
       this.drawOverlay();
-      this.onUpdate({ score: result.score, smoothed: this.smoothed, meanDelta: result.meanDelta });
+      this.onUpdate({ ...result, smoothed: this.smoothed });
     }
     const swap = this.prev;
     this.prev = this.curr;

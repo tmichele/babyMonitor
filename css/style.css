@@ -82,6 +82,12 @@ code { background: var(--card-2); padding: 1px 5px; border-radius: 5px; font-siz
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .card-head .section-title { margin: 0; }
 
+/* Visione notturna */
+.night-row { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+.night-row label.range { margin-bottom: 0; }
+.night-row label.check { margin-bottom: 6px; white-space: nowrap; }
+.svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
 /* Icone di navigazione nella barra e sottopagine */
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px;
