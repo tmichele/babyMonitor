@@ -325,54 +325,81 @@ export function renderCamera(root) {
   }
 
   // ----- modalità notte (controlli della fotocamera) -----
+  async function tryConstraints(track, constraints) {
+    try {
+      await track.applyConstraints(constraints);
+      return true;
+    } catch (err) {
+      console.info('Vincolo rifiutato', JSON.stringify(constraints), err?.message || err);
+      return false;
+    }
+  }
+
+  function clampToRange(value, range) {
+    const min = Number.isFinite(range?.min) ? range.min : -Infinity;
+    const max = Number.isFinite(range?.max) ? range.max : Infinity;
+    return Math.min(max, Math.max(min, value));
+  }
+
   async function applyNightMode(enabled) {
     const track = videoTrack();
     if (!track) return;
     const caps = track.getCapabilities?.() || {};
-    const applied = [];
+    console.info('Capacità fotocamera', caps);
+    const done = [];
     const missing = [];
-    const constraints = {};
-    const advanced = {};
+
+    // 1. frequenza fotogrammi: meno fotogrammi, più luce per ciascuno
     if (caps.frameRate) {
-      const fps = enabled ? Math.max(caps.frameRate.min || 5, 10) : 15;
-      constraints.frameRate = enabled ? { ideal: fps, max: Math.max(fps, 12) } : { ideal: 15, max: 24 };
-      applied.push(`${fps} fps`);
+      const fps = enabled ? clampToRange(10, caps.frameRate) : 15;
+      const ok = await tryConstraints(track, { frameRate: enabled ? { ideal: fps, max: Math.max(fps, 12) } : { ideal: 15, max: 24 } });
+      (ok ? done : missing).push(`${fps} fps`);
     } else {
       missing.push('frequenza fotogrammi');
     }
-    if (caps.exposureMode?.includes('continuous')) advanced.exposureMode = 'continuous';
-    if (caps.exposureCompensation) {
-      const { min = 0, max = 0, step = 1 } = caps.exposureCompensation;
-      const target = enabled ? max : Math.min(max, Math.max(min, 0));
-      advanced.exposureCompensation = Math.round(target / (step || 1)) * (step || 1);
-      applied.push(enabled ? `esposizione +${advanced.exposureCompensation}` : 'esposizione 0');
-    } else {
-      missing.push('esposizione');
-    }
-    if (caps.whiteBalanceMode?.includes('continuous')) advanced.whiteBalanceMode = 'continuous';
-    if (Object.keys(advanced).length) constraints.advanced = [advanced];
-    try {
-      await track.applyConstraints(constraints);
-    } catch (err) {
-      // Alcuni telefoni rifiutano il pacchetto completo: prova un vincolo alla volta.
-      try {
-        if (constraints.frameRate) await track.applyConstraints({ frameRate: constraints.frameRate });
-      } catch { missing.push('frequenza fotogrammi'); }
-      for (const [k, v] of Object.entries(advanced)) {
-        try {
-          await track.applyConstraints({ advanced: [{ [k]: v }] });
-        } catch { missing.push(k === 'exposureCompensation' ? 'esposizione' : k); }
+
+    // 2. esposizione: prima la compensazione (resta automatica), poi il tempo manuale + ISO
+    let exposure = 'non regolabile';
+    const modes = caps.exposureMode || [];
+    if (caps.exposureCompensation && Number.isFinite(caps.exposureCompensation.max)) {
+      const { min, max } = caps.exposureCompensation;
+      const target = enabled ? max : clampToRange(0, caps.exposureCompensation);
+      if (modes.includes('continuous')) await tryConstraints(track, { advanced: [{ exposureMode: 'continuous' }] });
+      if (await tryConstraints(track, { advanced: [{ exposureCompensation: target }] })) {
+        exposure = enabled ? `compensazione +${max}` : 'compensazione 0';
+      } else {
+        console.info('Compensazione esposizione rifiutata', { min, max, target });
       }
-      console.info('Modalità notte applicata parzialmente', err?.message || err);
     }
+    if (exposure === 'non regolabile' && enabled && modes.includes('manual') && caps.exposureTime) {
+      // exposureTime è in unità di 100 µs: 800 = 80 ms, compatibile con 10 fps
+      const time = clampToRange(800, caps.exposureTime);
+      const adv = { exposureMode: 'manual', exposureTime: time };
+      if (caps.iso) adv.iso = clampToRange(Math.round(caps.iso.max * 0.75), caps.iso);
+      if (await tryConstraints(track, { advanced: [adv] })) {
+        exposure = `manuale ${Math.round(time / 10)} ms${adv.iso ? ` · ISO ${adv.iso}` : ''}`;
+      } else if (await tryConstraints(track, { advanced: [{ exposureMode: 'manual' }, { exposureTime: time }] })) {
+        exposure = `manuale ${Math.round(time / 10)} ms`;
+      }
+    }
+    if (!enabled && modes.includes('continuous')) await tryConstraints(track, { advanced: [{ exposureMode: 'continuous' }] });
+    if (caps.whiteBalanceMode?.includes('continuous')) await tryConstraints(track, { advanced: [{ whiteBalanceMode: 'continuous' }] });
+
+    // 3. riepilogo
     const st = track.getSettings?.() || {};
-    const real = [];
-    if (st.frameRate) real.push(`${Math.round(st.frameRate)} fps`);
-    if (st.exposureCompensation != null) real.push(`esposizione ${st.exposureCompensation > 0 ? '+' : ''}${st.exposureCompensation}`);
-    const uniqMissing = Array.from(new Set(missing));
-    el.nightStatus.textContent = enabled
-      ? `Modalità notte attiva${real.length ? ` · ${real.join(' · ')}` : ''}${uniqMissing.length ? ` · non regolabile su questo dispositivo: ${uniqMissing.join(', ')}` : ''}`
-      : 'Modalità notte disattivata: impostazioni automatiche della fotocamera.';
+    const fpsReal = st.frameRate ? `${Math.round(st.frameRate)} fps` : null;
+    const available = Object.keys(caps)
+      .filter((k) => ['exposureMode', 'exposureCompensation', 'exposureTime', 'iso', 'brightness', 'contrast', 'torch', 'zoom', 'focusMode', 'whiteBalanceMode'].includes(k))
+      .map((k) => (Array.isArray(caps[k]) ? `${k}(${caps[k].join('/')})` : k));
+    if (enabled) {
+      const parts = [fpsReal || done[0], `esposizione ${exposure}`].filter(Boolean);
+      const hint = exposure === 'non regolabile'
+        ? ' Questo telefono non permette al browser di regolare l\'esposizione: usa la Visione notturna sul visualizzatore e una luce notturna tenue.'
+        : '';
+      el.nightStatus.textContent = `Modalità notte attiva · ${parts.join(' · ')}.${hint} Controlli esposti dal dispositivo: ${available.length ? available.join(', ') : 'nessuno'}.`;
+    } else {
+      el.nightStatus.textContent = 'Modalità notte disattivata: impostazioni automatiche della fotocamera.';
+    }
   }
 
   function heartbeat() {
