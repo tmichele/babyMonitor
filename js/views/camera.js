@@ -64,6 +64,8 @@ export function renderCamera(root) {
         <label class="grow">Videocamera <select id="cam-source"><option value="">Predefinita (posteriore)</option></select></label>
       </div>
       <label class="check"><input type="checkbox" id="cam-keep-on"> Tieni lo schermo acceso (usa "Schermo scuro" di notte)</label>
+      <label class="check"><input type="checkbox" id="cam-night"> 🌙 Modalità notte (esposizione più lunga, 10 fps)</label>
+      <p class="muted small" id="cam-night-status">Con poca luce chiede alla fotocamera di esporre di più e di rallentare i fotogrammi. Il rilevatore di movimento si adatta da solo al rumore del sensore.</p>
       <p class="muted small">Su Android, a schermo spento o con l'app in secondo piano, continuano la rilevazione del <b>pianto</b> e l'audio in diretta
       (modalità <b>solo audio</b>); il <b>movimento</b> riprende quando riaccendi lo schermo. Su iPhone il monitoraggio si ferma a schermo spento.</p>
     </div>
@@ -99,6 +101,8 @@ export function renderCamera(root) {
     overlay: $('#cam-overlay', root),
     status: $('#cam-status', root),
     keepOn: $('#cam-keep-on', root),
+    night: $('#cam-night', root),
+    nightStatus: $('#cam-night-status', root),
     viewers: $('#cam-viewers', root),
     battery: $('#cam-battery', root),
     start: $('#cam-start', root),
@@ -245,12 +249,13 @@ export function renderCamera(root) {
     state.streamer?.replaceStream(next);
     watchVideoTrack();
     updateMode();
+    if (prefs.getCameraNightMode()) applyNightMode(true);
     await restartCryDetector();
     old?.getTracks().forEach((t) => t.stop());
   }
 
   // ----- rilevazione -----
-  function onMotion({ smoothed }) {
+  function onMotion({ smoothed, brightness, pixelDelta, noise }) {
     if (state.audioOnly) return;
     const thr = scaledThresholds(settings.motionThresholds, settings.motionSensitivity);
     const level = state.motionTracker.update(scoreToLevel(smoothed, thr));
@@ -259,7 +264,9 @@ export function renderCamera(root) {
     setLevel(el.motion.bar, el.motion.label, level, MOTION_LABELS);
     el.motion.card.dataset.level = level;
     setMeter(el.motion.meter, Math.min(100, (smoothed / thr[2]) * 75));
-    el.motion.score.textContent = `${state.motion.score.toFixed(1)} % pixel in movimento`;
+    const light = Math.round(((brightness ?? 0) / 255) * 100);
+    const adaptive = pixelDelta > 28 ? ` · soglia adattiva ${pixelDelta} (rumore ${noise})` : '';
+    el.motion.score.textContent = `${state.motion.score.toFixed(1)} % pixel in movimento · luce ${light} %${adaptive}`;
     el.darkMotion.textContent = MOTION_LABELS[level];
     maybeLogEvent('motion', level, state.motion.score);
     if (changed) publishStateNow();
@@ -315,6 +322,57 @@ export function renderCamera(root) {
     track.addEventListener('mute', updateMode);
     track.addEventListener('unmute', updateMode);
     track.addEventListener('ended', updateMode);
+  }
+
+  // ----- modalità notte (controlli della fotocamera) -----
+  async function applyNightMode(enabled) {
+    const track = videoTrack();
+    if (!track) return;
+    const caps = track.getCapabilities?.() || {};
+    const applied = [];
+    const missing = [];
+    const constraints = {};
+    const advanced = {};
+    if (caps.frameRate) {
+      const fps = enabled ? Math.max(caps.frameRate.min || 5, 10) : 15;
+      constraints.frameRate = enabled ? { ideal: fps, max: Math.max(fps, 12) } : { ideal: 15, max: 24 };
+      applied.push(`${fps} fps`);
+    } else {
+      missing.push('frequenza fotogrammi');
+    }
+    if (caps.exposureMode?.includes('continuous')) advanced.exposureMode = 'continuous';
+    if (caps.exposureCompensation) {
+      const { min = 0, max = 0, step = 1 } = caps.exposureCompensation;
+      const target = enabled ? max : Math.min(max, Math.max(min, 0));
+      advanced.exposureCompensation = Math.round(target / (step || 1)) * (step || 1);
+      applied.push(enabled ? `esposizione +${advanced.exposureCompensation}` : 'esposizione 0');
+    } else {
+      missing.push('esposizione');
+    }
+    if (caps.whiteBalanceMode?.includes('continuous')) advanced.whiteBalanceMode = 'continuous';
+    if (Object.keys(advanced).length) constraints.advanced = [advanced];
+    try {
+      await track.applyConstraints(constraints);
+    } catch (err) {
+      // Alcuni telefoni rifiutano il pacchetto completo: prova un vincolo alla volta.
+      try {
+        if (constraints.frameRate) await track.applyConstraints({ frameRate: constraints.frameRate });
+      } catch { missing.push('frequenza fotogrammi'); }
+      for (const [k, v] of Object.entries(advanced)) {
+        try {
+          await track.applyConstraints({ advanced: [{ [k]: v }] });
+        } catch { missing.push(k === 'exposureCompensation' ? 'esposizione' : k); }
+      }
+      console.info('Modalità notte applicata parzialmente', err?.message || err);
+    }
+    const st = track.getSettings?.() || {};
+    const real = [];
+    if (st.frameRate) real.push(`${Math.round(st.frameRate)} fps`);
+    if (st.exposureCompensation != null) real.push(`esposizione ${st.exposureCompensation > 0 ? '+' : ''}${st.exposureCompensation}`);
+    const uniqMissing = Array.from(new Set(missing));
+    el.nightStatus.textContent = enabled
+      ? `Modalità notte attiva${real.length ? ` · ${real.join(' · ')}` : ''}${uniqMissing.length ? ` · non regolabile su questo dispositivo: ${uniqMissing.join(', ')}` : ''}`
+      : 'Modalità notte disattivata: impostazioni automatiche della fotocamera.';
   }
 
   function heartbeat() {
@@ -452,6 +510,7 @@ export function renderCamera(root) {
       state.audioOnly = false;
       watchVideoTrack();
       updateMode();
+      if (prefs.getCameraNightMode()) applyNightMode(true);
 
       state.streamer = new CameraStreamer({
         stream: state.stream,
@@ -550,6 +609,12 @@ export function renderCamera(root) {
   window.addEventListener('pagehide', onPageHide);
   document.addEventListener('visibilitychange', updateMode);
 
+  el.night.checked = prefs.getCameraNightMode();
+  el.night.addEventListener('change', () => {
+    prefs.setCameraNightMode(el.night.checked);
+    if (state.running) applyNightMode(el.night.checked);
+    else el.nightStatus.textContent = el.night.checked ? 'Verrà applicata all\'avvio del monitoraggio.' : 'Modalità notte disattivata.';
+  });
   el.keepOn.checked = prefs.getCameraKeepScreenOn();
   el.keepOn.addEventListener('change', () => {
     prefs.setCameraKeepScreenOn(el.keepOn.checked);

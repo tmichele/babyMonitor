@@ -157,6 +157,7 @@ try {
   await shot(cam, '04a-camera-settings');
   await cam.fill('#cam-name', 'Cameretta');
   await cam.dispatchEvent('#cam-name', 'change');
+  await cam.check('#cam-night');
   await goSub(cam, 'camera', '');
   await cam.click('#cam-start');
   await waitFor(() => cam.$eval('#cam-status', (e) => e.textContent === 'In ascolto'), { label: 'stato In ascolto' });
@@ -175,6 +176,11 @@ try {
   check(Number.isFinite(camBattery.level), `batteria della camera pubblicata (${camBattery.level}%, in carica: ${camBattery.charging})`);
   check(/%/.test(await cam.$eval('#topbar-battery', (e) => e.textContent)), 'batteria locale nella barra in alto');
   await waitFor(() => cam.$eval('#motion-score', (e) => /pixel/.test(e.textContent)), { label: 'punteggio movimento' });
+  check(/luce \d+ %/.test(await cam.$eval('#motion-score', (e) => e.textContent)), 'il movimento riporta anche la luminosità della scena');
+  await goSub(cam, 'camera', 'settings');
+  const nightStatus = await cam.$eval('#cam-night-status', (e) => e.textContent);
+  check(/Modalità notte attiva/.test(nightStatus), `modalità notte applicata (${nightStatus})`);
+  await goSub(cam, 'camera', '');
   await waitFor(() => cam.$eval('#cry-score', (e) => /punteggio/.test(e.textContent)), { label: 'punteggio pianto' });
   check(true, 'rilevatori movimento e pianto attivi');
   check(await cam.$eval('#cry-card', (e) => e.dataset.engine) === 'worklet', 'analisi del pianto su AudioWorklet');
@@ -231,6 +237,15 @@ try {
   check(true, 'connessione WebRTC stabilita');
   const dims = await waitFor(() => view.$eval('#v-video', (v) => (v.videoWidth > 0 ? [v.videoWidth, v.videoHeight] : null)), { label: 'frame video' });
   check(dims[0] > 0, `il visualizzatore riceve video ${dims[0]}x${dims[1]}`);
+  await view.fill('#n-level', '60');
+  await view.dispatchEvent('#n-level', 'input');
+  await view.check('#n-gray');
+  const filter = await view.$eval('#v-video', (v) => v.style.filter);
+  check(/night-gamma/.test(filter) && /brightness\(1\.48\)/.test(filter) && /saturate\(0\)/.test(filter), `visione notturna applicata (${filter})`);
+  await view.fill('#n-level', '0');
+  await view.dispatchEvent('#n-level', 'input');
+  await view.uncheck('#n-gray');
+  check((await view.$eval('#v-video', (v) => v.style.filter)) === '', 'visione notturna disattivata');
   await shot(view, '05-viewer-live');
   await view.click('#z-in');
   check((await view.$eval('#v-video', (v) => v.style.transform)).includes('scale(1.5)'), 'zoom + ingrandisce il video');

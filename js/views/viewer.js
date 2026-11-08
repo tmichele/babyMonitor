@@ -22,6 +22,8 @@ const DEFAULT_PREFS = {
   keepAwake: false,
   autoVideo: true,
   batteryAlert: true,
+  nightLevel: 0,
+  nightGray: false,
 };
 
 export function renderViewer(root) {
@@ -62,6 +64,20 @@ export function renderViewer(root) {
           <button id="v-mute" class="btn" hidden>🔈 Audio attivo</button>
         </div>
         <p class="muted small" id="v-msg" hidden></p>
+        <div class="night-row">
+          <label class="range grow">🌙 Visione notturna <span id="n-level-v">off</span>
+            <input type="range" id="n-level" min="0" max="100" step="5"></label>
+          <label class="check"><input type="checkbox" id="n-gray"> Bianco e nero</label>
+        </div>
+        <svg class="svg-defs" aria-hidden="true" width="0" height="0">
+          <filter id="night-gamma" color-interpolation-filters="sRGB">
+            <feComponentTransfer>
+              <feFuncR id="ng-r" type="gamma" amplitude="1" exponent="1" offset="0"/>
+              <feFuncG id="ng-g" type="gamma" amplitude="1" exponent="1" offset="0"/>
+              <feFuncB id="ng-b" type="gamma" amplitude="1" exponent="1" offset="0"/>
+            </feComponentTransfer>
+          </filter>
+        </svg>
         <p class="muted small">Pizzica o fai doppio tocco per ingrandire, trascina per spostare. Eventi e impostazioni dalle icone 🕒 e ⚙️ in alto.</p>
       </div>
     </div>
@@ -154,6 +170,9 @@ export function renderViewer(root) {
     rSave: $('#r-save', root),
     rThresholds: $('#r-thresholds', root),
     eventsCam: $('#v-events-cam', root),
+    nLevel: $('#n-level', root),
+    nLevelV: $('#n-level-v', root),
+    nGray: $('#n-gray', root),
     rCamName: $('#r-cam-name', root),
     events: $('#v-events', root),
     motion: { bar: $('#motion-bar', root), label: $('#motion-label', root), meter: $('#motion-meter', root), score: $('#motion-score', root), card: $('#motion-card', root) },
@@ -535,6 +554,32 @@ export function renderViewer(root) {
   }
   el.vStart.addEventListener('click', startStream);
   el.vStop.addEventListener('click', stopStream);
+  // ----- visione notturna (filtro sul video ricevuto, nessun costo per la camera) -----
+  function applyNightFilter() {
+    const level = Number(viewerPrefs.nightLevel) || 0;
+    const t = level / 100;
+    el.nLevel.value = String(level);
+    el.nLevelV.textContent = level ? `${level} %` : 'off';
+    el.nGray.checked = !!viewerPrefs.nightGray;
+    const gamma = (1 - 0.6 * t).toFixed(2); // <1 schiarisce le ombre senza bruciare le luci
+    ['ng-r', 'ng-g', 'ng-b'].forEach((id) => $(`#${id}`, root)?.setAttribute('exponent', gamma));
+    const parts = [];
+    if (t > 0) parts.push('url(#night-gamma)', `brightness(${(1 + 0.8 * t).toFixed(2)})`, `contrast(${(1 + 0.25 * t).toFixed(2)})`);
+    if (viewerPrefs.nightGray) parts.push('saturate(0)');
+    el.video.style.filter = parts.join(' ');
+  }
+  el.nLevel.addEventListener('input', () => {
+    viewerPrefs.nightLevel = Number(el.nLevel.value);
+    prefs.setViewerPrefs(viewerPrefs);
+    applyNightFilter();
+  });
+  el.nGray.addEventListener('change', () => {
+    viewerPrefs.nightGray = el.nGray.checked;
+    prefs.setViewerPrefs(viewerPrefs);
+    applyNightFilter();
+  });
+  applyNightFilter();
+
   // ----- zoom e schermo intero -----
   const zoom = attachZoom(el.preview, el.video, {
     onChange: (scale) => {

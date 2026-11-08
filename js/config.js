@@ -7,6 +7,7 @@ const KEYS = {
   deviceName: 'babymonitor.deviceName',
   cameraSettings: 'babymonitor.cameraSettings',
   cameraKeepScreenOn: 'babymonitor.cameraKeepScreenOn',
+  cameraNightMode: 'babymonitor.cameraNightMode',
   viewerPrefs: 'babymonitor.viewerPrefs',
   selectedCamera: 'babymonitor.selectedCamera',
   videoSource: 'babymonitor.videoSource',
@@ -166,6 +167,8 @@ export const prefs = {
   setSelectedCamera: (id) => writeJson(KEYS.selectedCamera, id),
   getVideoSource: () => readJson(KEYS.videoSource, null),
   getCameraKeepScreenOn: () => readJson(KEYS.cameraKeepScreenOn, true) !== false,
+  getCameraNightMode: () => readJson(KEYS.cameraNightMode, false) === true,
+  setCameraNightMode: (v) => writeJson(KEYS.cameraNightMode, !!v),
   setCameraKeepScreenOn: (v) => writeJson(KEYS.cameraKeepScreenOn, !!v),
   setVideoSource: (id) => writeJson(KEYS.videoSource, id),
 };
